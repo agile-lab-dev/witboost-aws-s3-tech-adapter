@@ -1,0 +1,20 @@
+spring:
+  application:
+    name: s3-tech-adapter
+
+logging:
+  level:
+    org.zalando.logbook: TRACE
+
+logbook:
+  obfuscate:
+    headers:
+      - Authorization
+      - X-API-Key
+
+server:
+  port: 8888
+
+springdoc:
+  swagger-ui:
+    path: /docs

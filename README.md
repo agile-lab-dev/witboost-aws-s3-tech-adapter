@@ -1,93 +1,198 @@
-# witboost.Mesh.Provisioning.S3
+<p align="center">
+    <a href="https://www.agilelab.it/witboost">
+        <img src="docs/img/witboost_logo.svg" alt="witboost" width=600 >
+    </a>
+</p>
+
+Designed by [Agile Lab](https://www.agilelab.it/), Witboost is a versatile platform that addresses a wide range of sophisticated data engineering challenges. It enables businesses to discover, enhance, and productize their data, fostering the creation of automated data platforms that adhere to the highest standards of data governance. Want to know more about Witboost? Check it out [here](https://www.witboost.com) or [contact us!](https://www.witboost.com/contact-us).
+
+This repository is part of our [Starter Kit](https://github.com/agile-lab-dev/witboost-starter-kit) meant to showcase Witboost integration capabilities and provide a "batteries-included" product.
+
+# S3 Tech Adapter
+
+- [Overview](#overview)
+- [Building](#building)
+- [Running](#running)
+- [OpenTelemetry Setup](docs/opentelemetry.md)
+- [Deploying](#deploying)
 
 
+## Overview
 
-## Getting started
+This project implements a simple Tech Adapter for Amazon S3.
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+### What's a Tech Adapter?
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+A Tech Adapter (formerly a Specific Provisioner) is a microservice which is in charge of deploying components that use a specific technology. When the deployment of a Data Product is triggered, the platform generates it descriptor and orchestrates the deployment of every component contained in the Data Product. For every such component the platform knows which Tech Adapter is responsible for its deployment, and can thus send a provisioning request with the descriptor to it so that the Tech Adapter can perform whatever operation is required to fulfill this request and report back the outcome to the platform.
 
-## Add your files
+You can learn more about how the Tech Adapters fit in the broader picture [here](https://docs.witboost.com/docs/p2_arch/p1_intro/#deploy-flow).
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
+### Amazon S3
 
+Amazon Simple Storage Service (Amazon S3) is an object storage service that offers scalability, data availability, security, and performance. Amazon S3 is used to store and protect any amount of data for a range of use cases, such as data lakes, websites, mobile applications, backup and restore, archive, enterprise applications, IoT devices, and big data analytics. Amazon S3 provides management features so that you can optimize, organize, and configure access to your data to meet your specific business, organizational, and compliance requirements.
+
+Learn more on [Amazon S3 official documentation](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html).
+
+
+### Software stack
+
+This microservice is written in Java 17, using SpringBoot for the HTTP layer supported by the Java Tech Adapter Framework. Project is built with Apache Maven and supports packaging and Docker image, ideal for Kubernetes deployments (which is the preferred option).
+
+The API layer is handled by the framework and follows this [OpenAPI Specification](https://github.com/agile-lab-dev/witboost-java-tech-adapter-framework/tree/master/core/src/main/resources/interface-specification.yml).
+
+### Git hooks
+
+Hooks are programs you can place in a hooks directory to trigger actions at certain points in git’s execution. Hooks that don’t have the executable bit set are ignored.
+
+The hooks are all stored in the hooks subdirectory of the Git directory. In most projects, that’s `.git/hooks`.
+
+Out of the many available hooks supported by Git, we use `pre-commit` hook in order to check the code changes before each commit. If the hook returns a non-zero exit status, the commit is aborted.
+
+
+#### Setup Pre-commit hooks
+
+In order to use `pre-commit` hook, you can use [**pre-commit**](https://pre-commit.com/) framework to set up and manage multi-language pre-commit hooks.
+
+To set up pre-commit hooks, follow the below steps:
+
+- Install pre-commit framework either using pip (or) using homebrew (if your Operating System is macOS):
+
+    - Using pip:
+      ```bash
+      pip install pre-commit
+      ```
+    - Using homebrew:
+      ```bash
+      brew install pre-commit
+      ```
+
+- Once pre-commit is installed, you can execute the following:
+
+```bash
+pre-commit --version
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/AgileFactory/Witboost.Mesh/Provisioning/aws/witboost.mesh.provisioning.s3.git
-git branch -M master
-git push -uf origin master
+
+If you see something like `pre-commit 4.0.1`, your installation is ready to use!
+
+
+- To use pre-commit, create a file named `.pre-commit-config.yaml` inside the project directory. This file tells pre-commit which hooks needed to be installed based on your inputs. Below is an example configuration:
+
+```bash
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: trailing-whitespace
 ```
 
-## Integrate with your tools
+The above configuration says to download the `pre-commit-hooks` project and run its trailing-whitespace hook on the project.
 
-- [ ] [Set up project integrations](https://gitlab.com/AgileFactory/Witboost.Mesh/Provisioning/aws/witboost.mesh.provisioning.s3/-/settings/integrations)
 
-## Collaborate with your team
+- Run the below command to install pre-commit into your git hooks. pre-commit will then run on every commit.
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
+```bash
+pre-commit install
+```
 
-## Test and Deploy
+## Building
 
-Use the built-in continuous integration in GitLab.
+**Requirements:**
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/index.html)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+- Java 17
+- Apache Maven 3.9+
+- For Helm deployment: Helm 3+, Helm-docs 1.11.0
 
-***
+**Version:** the version is set dynamically via an environment variable, `PROVISIONER_VERSION`. Make sure you have it exported, even for local development. Example:
 
-# Editing this README
+```bash
+export PROVISIONER_VERSION=0.0.0-SNAPHSOT
+```
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+**Build:**
 
-## Suggestions for a good README
+```bash
+mvn compile
+```
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+**Type check:** is handled by Checkstyle:
 
-## Name
-Choose a self-explaining name for your project.
+```bash
+mvn checkstyle:check
+```
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+**Bug checks:** are handled by SpotBugs:
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+```bash
+mvn spotbugs:check
+```
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+**Tests:** are handled by JUnit:
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+```bash
+mvn test
+```
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+**Artifacts & Docker image:** the project leverages Maven for packaging. Build artifacts (normal and fat jar) with:
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+```bash
+mvn package spring-boot:repackage
+```
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+The Docker image can be built with:
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+```bash
+docker build .
+```
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+More details can be found [here](docs/docker.md).
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+*Note:* when running in the CI/CD pipeline the version for the project is automatically computed using information gathered from Git, using branch name and tags. Unless you are on a release branch `1.2.x` or a tag `v1.2.3` it will end up being `0.0.0`. You can follow this branch/tag convention or update the version computation to match your preferred strategy. When running locally if you do not care about the version (ie, nothing gets published or similar) you can manually set the environment variable `PROVISIONER_VERSION` to avoid warnings and oddly-named artifacts; as an example you can set it to the build time like this:
+```bash
+export PROVISIONER_VERSION=$(date +%Y%m%d-%H%M%S);
+```
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+**CI/CD:** the pipeline is based on GitLab CI as that's what we use internally. It's configured by the `.gitlab-ci.yaml` file in the root of the repository. You can use that as a starting point for your customizations.
+
+### Implementing server logic
+
+The Tech Adapter utilizes the Java Tech Adapter Framework, which provides abstraction of the API layer, error handling, model definition, and more; allowing Tech Adapter developers to focus only on implementing the specific business logic related to the technology for which the Tech Adapter is being developed. For this, four interfaces need to be implemented and injected via Spring beans in order to make your Tech Adapter work:
+
+- **ProvisionService**: Provides the business logic for component provision, unprovision, update access control, and reverse provisioning.
+- **ComponentValidationService**: Provides the business logic for component validation, executed for validation and (un)provisioning operations.
+- **ComponentClassProvider**: Interface that maps a component's useCaseTemplateId with a Class that represents the Component model, allowing to use extensions of the provided Components.
+- **SpecificClassProvider**: Interface that maps a component's useCaseTemplateId with a Class that represents the Specific model.
+
+Follow the Java Tech Adapter Framework [usage guide](https://github.com/agile-lab-dev/witboost-java-tech-adapter-framework/tree/master/docs/usage.md) for more information on how to develop your Tech Adapter.
+
+## Running
+
+To run the server locally, use:
+
+```bash
+mvn -pl common spring-boot:run
+```
+
+By default, the server binds to port `8888` on localhost. After it's up and running you can make provisioning requests to this address. You can access the running application [here](http://127.0.0.1:8888).
+
+SwaggerUI is configured and hosted on the path `/docs`. You can access it [here](http://127.0.0.1:8888/docs)
+
+## Deploying
+
+This microservice is meant to be deployed to a Kubernetes cluster with the included Helm chart and the scripts that can be found in the `helm` subdirectory. You can find more details [here](helm/README.md).
 
 ## License
-For open source projects, say how it is licensed.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+This project is available under the [Apache License, Version 2.0](https://opensource.org/licenses/Apache-2.0); see [LICENSE](LICENSE) for full details.
+
+## About Witboost
+
+[Witboost](https://witboost.com/) is a cutting-edge Data Experience platform, that streamlines complex data projects across various platforms, enabling seamless data production and consumption. This unified approach empowers you to fully utilize your data without platform-specific hurdles, fostering smoother collaboration across teams.
+
+It seamlessly blends business-relevant information, data governance processes, and IT delivery, ensuring technically sound data projects aligned with strategic objectives. Witboost facilitates data-driven decision-making while maintaining data security, ethics, and regulatory compliance.
+
+Moreover, Witboost maximizes data potential through automation, freeing resources for strategic initiatives. Apply your data for growth, innovation and competitive advantage.
+
+[Contact us](https://witboost.com/contact-us) or follow us on:
+
+- [LinkedIn](https://www.linkedin.com/showcase/witboost/)
+- [YouTube](https://www.youtube.com/@witboost-platform)
