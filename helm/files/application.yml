@@ -18,3 +18,9 @@ server:
 springdoc:
   swagger-ui:
     path: /docs
+
+s3:
+  object:
+    wait-timeout-seconds: 60
+  bucket:
+    wait-timeout-seconds: 60

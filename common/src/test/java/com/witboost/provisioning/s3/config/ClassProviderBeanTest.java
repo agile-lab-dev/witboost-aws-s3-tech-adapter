@@ -14,14 +14,12 @@ class ClassProviderBeanTest {
     @Test
     void defaultSpecificProvider() {
         var specificProvider = classProviderBean.specificClassProvider();
-
         assertEquals(Option.of(S3Specific.class), specificProvider.get("a-urn"));
     }
 
     @Test
     void defaultComponentProvider() {
         var componentProvider = classProviderBean.componentClassProvider();
-
         assertEquals(Option.of(StorageArea.class), componentProvider.get("whatever"));
     }
 }

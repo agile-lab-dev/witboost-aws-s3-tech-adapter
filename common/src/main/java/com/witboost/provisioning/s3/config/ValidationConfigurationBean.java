@@ -9,6 +9,11 @@ import org.springframework.context.annotation.Configuration;
 public class ValidationConfigurationBean {
 
     @Bean
+    StorageAreaValidationService storageAreaValidationService() {
+        return new StorageAreaValidationService();
+    }
+
+    @Bean
     ValidationConfiguration validationConfiguration(StorageAreaValidationService storageAreaValidationService) {
         return ValidationConfiguration.builder()
                 .storageValidationService(storageAreaValidationService)
