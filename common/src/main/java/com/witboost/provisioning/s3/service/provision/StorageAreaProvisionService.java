@@ -55,6 +55,7 @@ public class StorageAreaProvisionService implements ProvisionService {
         if (bucketCreationResult.isLeft()) return Either.left(bucketCreationResult.getLeft());
 
         var componentName = component.get().getName();
+        var location = new StringBuilder("s3://").append(bucketName).append("/").append(componentName);
 
         Either<FailedOperation, Void> folderCreationResult =
                 bucketManager.createFolder(s3Client, bucketName, componentName);
@@ -71,7 +72,12 @@ public class StorageAreaProvisionService implements ProvisionService {
                 Map.of(
                         "type", "string",
                         "label", "Folder name",
-                        "value", componentName));
+                        "value", componentName),
+                "location",
+                Map.of(
+                        "type", "string",
+                        "label", "Location",
+                        "value", location));
 
         ProvisionInfo provisionInfo = ProvisionInfo.builder()
                 .privateInfo(Optional.of(info))

@@ -3,6 +3,7 @@ package com.witboost.provisioning.s3.service.provision;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.witboost.provisioning.model.DataProduct;
 import com.witboost.provisioning.model.Specific;
 import com.witboost.provisioning.model.StorageArea;
@@ -13,6 +14,7 @@ import com.witboost.provisioning.s3.client.BucketManager;
 import com.witboost.provisioning.s3.model.S3Specific;
 import io.vavr.control.Either;
 import java.util.Collections;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
 import org.junit.jupiter.api.BeforeEach;
@@ -61,6 +63,34 @@ class StorageAreaProvisionServiceTest {
         assertTrue(result.isRight(), "Provision should succeed");
         verify(bucketManager).createBucket(eq(s3Client), eq(bucketName), anyString());
         verify(bucketManager).createFolder(eq(s3Client), eq(bucketName), anyString());
+    }
+
+    @Test
+    void testProvision_success1() {
+
+        when(s3ClientProvider.apply(any(Region.class))).thenReturn(s3Client);
+        when(bucketManager.createBucket(eq(s3Client), eq(bucketName), anyString()))
+                .thenReturn(Either.right(null));
+        when(bucketManager.createFolder(eq(s3Client), eq(bucketName), anyString()))
+                .thenReturn(Either.right(null));
+
+        Either<FailedOperation, ProvisionInfo> result = storageAreaProvisionService.provision(request);
+
+        assertTrue(result.isRight(), "Provision should succeed");
+        verify(bucketManager).createBucket(eq(s3Client), eq(bucketName), anyString());
+        verify(bucketManager).createFolder(eq(s3Client), eq(bucketName), anyString());
+
+        var privateInfo =
+                new ObjectMapper().convertValue(result.get().getPrivateInfo().get(), Map.class);
+        var publicInfo =
+                new ObjectMapper().convertValue(result.get().getPublicInfo().get(), Map.class);
+
+        assertEquals(3, privateInfo.size());
+        assertEquals(3, publicInfo.size());
+
+        assertTrue(privateInfo.containsKey("location"));
+        assertTrue(privateInfo.containsKey("bucket"));
+        assertTrue(privateInfo.containsKey("folder"));
     }
 
     @Test
