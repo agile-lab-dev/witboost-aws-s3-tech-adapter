@@ -53,7 +53,7 @@ class StorageAreaProvisionServiceTest {
     void testProvision_success() {
 
         when(s3ClientProvider.apply(any(Region.class))).thenReturn(s3Client);
-        when(bucketManager.createBucket(eq(s3Client), eq(bucketName), anyString()))
+        when(bucketManager.createBucket(eq(s3Client), eq(bucketName), anyString(), anyBoolean()))
                 .thenReturn(Either.right(null));
         when(bucketManager.createFolder(eq(s3Client), eq(bucketName), anyString()))
                 .thenReturn(Either.right(null));
@@ -61,7 +61,7 @@ class StorageAreaProvisionServiceTest {
         Either<FailedOperation, ProvisionInfo> result = storageAreaProvisionService.provision(request);
 
         assertTrue(result.isRight(), "Provision should succeed");
-        verify(bucketManager).createBucket(eq(s3Client), eq(bucketName), anyString());
+        verify(bucketManager).createBucket(eq(s3Client), eq(bucketName), anyString(), anyBoolean());
         verify(bucketManager).createFolder(eq(s3Client), eq(bucketName), anyString());
     }
 
@@ -69,7 +69,7 @@ class StorageAreaProvisionServiceTest {
     void testProvision_success1() {
 
         when(s3ClientProvider.apply(any(Region.class))).thenReturn(s3Client);
-        when(bucketManager.createBucket(eq(s3Client), eq(bucketName), anyString()))
+        when(bucketManager.createBucket(eq(s3Client), eq(bucketName), anyString(), anyBoolean()))
                 .thenReturn(Either.right(null));
         when(bucketManager.createFolder(eq(s3Client), eq(bucketName), anyString()))
                 .thenReturn(Either.right(null));
@@ -77,7 +77,7 @@ class StorageAreaProvisionServiceTest {
         Either<FailedOperation, ProvisionInfo> result = storageAreaProvisionService.provision(request);
 
         assertTrue(result.isRight(), "Provision should succeed");
-        verify(bucketManager).createBucket(eq(s3Client), eq(bucketName), anyString());
+        verify(bucketManager).createBucket(eq(s3Client), eq(bucketName), anyString(), anyBoolean());
         verify(bucketManager).createFolder(eq(s3Client), eq(bucketName), anyString());
 
         var privateInfo =
@@ -122,14 +122,14 @@ class StorageAreaProvisionServiceTest {
     void testProvision_bucketCreationFailure() {
 
         when(s3ClientProvider.apply(any(Region.class))).thenReturn(s3Client);
-        when(bucketManager.createBucket(eq(s3Client), eq(bucketName), anyString()))
+        when(bucketManager.createBucket(eq(s3Client), eq(bucketName), anyString(), anyBoolean()))
                 .thenReturn(Either.left(new FailedOperation("Bucket creation failed", Collections.emptyList())));
 
         Either<FailedOperation, ProvisionInfo> result = storageAreaProvisionService.provision(request);
 
         assertTrue(result.isLeft(), "Provision should fail if bucket creation fails");
         assertEquals("Bucket creation failed", result.getLeft().message());
-        verify(bucketManager).createBucket(eq(s3Client), eq(bucketName), anyString());
+        verify(bucketManager).createBucket(eq(s3Client), eq(bucketName), anyString(), anyBoolean());
         verify(bucketManager, never()).createFolder(any(), any(), any());
     }
 
@@ -137,7 +137,7 @@ class StorageAreaProvisionServiceTest {
     void testProvision_folderCreationFailure() {
 
         when(s3ClientProvider.apply(any(Region.class))).thenReturn(s3Client);
-        when(bucketManager.createBucket(eq(s3Client), eq(bucketName), anyString()))
+        when(bucketManager.createBucket(eq(s3Client), eq(bucketName), anyString(), anyBoolean()))
                 .thenReturn(Either.right(null));
         when(bucketManager.createFolder(eq(s3Client), eq(bucketName), anyString()))
                 .thenReturn(Either.left(new FailedOperation("Folder creation failed", Collections.emptyList())));
@@ -146,7 +146,7 @@ class StorageAreaProvisionServiceTest {
 
         assertTrue(result.isLeft(), "Provision should fail if folder creation fails");
         assertEquals("Folder creation failed", result.getLeft().message());
-        verify(bucketManager).createBucket(eq(s3Client), eq(bucketName), anyString());
+        verify(bucketManager).createBucket(eq(s3Client), eq(bucketName), anyString(), anyBoolean());
         verify(bucketManager).createFolder(any(), any(), any());
     }
 
@@ -227,7 +227,6 @@ class StorageAreaProvisionServiceTest {
 
     private S3Specific createS3Specific() {
         S3Specific s3Specific = new S3Specific();
-        s3Specific.setAccountId("accountId");
         s3Specific.setRegion("us-west-2");
         s3Specific.setMultipleVersion(false);
         return s3Specific;
@@ -237,6 +236,7 @@ class StorageAreaProvisionServiceTest {
         StorageArea storage = new StorageArea<>();
         storage.setName("fake-storage");
         storage.setSpecific(createS3Specific());
+        storage.setId("urn:dmb:cmp:domain:dp:0:componentname");
         return storage;
     }
 

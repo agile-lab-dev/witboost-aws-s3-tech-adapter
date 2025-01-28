@@ -5,7 +5,6 @@ import com.witboost.provisioning.model.common.Problem;
 import io.vavr.control.Either;
 import jakarta.validation.constraints.NotBlank;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import lombok.NoArgsConstructor;
@@ -17,7 +16,6 @@ import org.springframework.stereotype.Service;
 import software.amazon.awssdk.awscore.exception.AwsServiceException;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.core.waiters.WaiterOverrideConfiguration;
-import software.amazon.awssdk.http.HttpStatusCode;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
 import software.amazon.awssdk.services.s3.waiters.S3Waiter;
@@ -48,7 +46,7 @@ public class BucketManager {
      * @return an {@link Either} containing {@link FailedOperation} in case of error or {@code null} on success.
      */
     public Either<FailedOperation, Void> createBucket(
-            @NotNull S3Client s3Client, @NotNull String bucketName, @NotNull String region) {
+            @NotNull S3Client s3Client, @NotNull String bucketName, @NotNull String region, Boolean multipleVersion) {
         try {
             logger.info("Starting creation of bucket '{}' in region '{}'.", bucketName, region);
 
@@ -69,7 +67,7 @@ public class BucketManager {
                         "[Bucket: %s] Error: The bucket already exists in a different region (%s). Cannot create a new one in %s",
                         bucketName, existingRegion.get(), region);
                 logger.error(error);
-                return Either.left(new FailedOperation(error, Collections.singletonList(new Problem(error))));
+                return Either.left(new FailedOperation(error, List.of(new Problem(error))));
             }
 
             // Create the bucket
@@ -81,45 +79,26 @@ public class BucketManager {
             Either<FailedOperation, Void> waitForBucketExistence = waitForBucketExistence(s3Client, bucketName);
             if (waitForBucketExistence.isLeft()) return Either.left(waitForBucketExistence.getLeft());
 
+            if (multipleVersion) {
+                VersioningConfiguration versioningConfiguration = VersioningConfiguration.builder()
+                        .status(BucketVersioningStatus.ENABLED)
+                        .build();
+                PutBucketVersioningRequest putBucketVersioningRequest = PutBucketVersioningRequest.builder()
+                        .bucket(bucketName)
+                        .versioningConfiguration(versioningConfiguration)
+                        .build();
+                s3Client.putBucketVersioning(putBucketVersioningRequest);
+            }
+
             logger.info("Bucket '{}' is successfully created in region '{}'.", bucketName, region);
             return Either.right(null);
 
         } catch (Exception e) {
             String error = String.format(
-                    "[Bucket: %s] Error: An unexpected error occurred while creating the bucket. Please try again later. If the issue still persists, contact the platform team for assistance! Details: %s",
+                    "[Bucket: %s] Error: An unexpected error occurred while creating the bucket. Details: %s",
                     bucketName, e.getMessage());
             logger.error(error, e);
-            return Either.left(new FailedOperation(error, Collections.singletonList(new Problem(error, e))));
-        }
-    }
-
-    /**
-     * Retrieves the AWS region where the specified bucket is located.
-     * This operation returns the region or an error if the region cannot be retrieved.
-     *
-     * @param s3Client   the {@link S3Client} used to perform the operation.
-     * @param bucketName the name of the bucket.
-     * @return an {@link Either} containing the region name or a {@link FailedOperation} in case of error.
-     */
-    protected Either<FailedOperation, String> getBucketRegion(@NotNull S3Client s3Client, @NotBlank String bucketName) {
-        try {
-            logger.debug("Retrieving region for bucket '{}'.", bucketName);
-
-            GetBucketLocationResponse locationResponse = s3Client.getBucketLocation(
-                    GetBucketLocationRequest.builder().bucket(bucketName).build());
-
-            BucketLocationConstraint locationConstraint = locationResponse.locationConstraint();
-            String region = (locationConstraint == null) ? "us-east-1" : locationConstraint.toString();
-
-            logger.debug("Bucket '{}' is located in region '{}'.", bucketName, region);
-            return Either.right(region);
-
-        } catch (Exception e) {
-            String error = String.format(
-                    "[Bucket: %s] Error: An unexpected error occurred while getting the region of the bucket. Please try again later. If the issue still persists, contact the platform team for assistance! Details: %s",
-                    bucketName, e.getMessage());
-            logger.error(error, e);
-            return Either.left(new FailedOperation(error, Collections.singletonList(new Problem(error, e))));
+            return Either.left(new FailedOperation(error, List.of(new Problem(error, e))));
         }
     }
 
@@ -164,14 +143,14 @@ public class BucketManager {
             } else {
                 String error = String.format(
                         "[Bucket '%s'] The bucket does not exist or an unexpected condition occurred.", bucketName);
-                return Either.left(new FailedOperation(error, Collections.singletonList(new Problem(error))));
+                return Either.left(new FailedOperation(error, List.of(new Problem(error))));
             }
         } catch (Exception e) {
             String error = String.format(
                     "[Bucket '%s'] An error occurred while waiting for bucket to exist: %s",
                     bucketName, e.getMessage());
             logger.error(error, e);
-            return Either.left(new FailedOperation(error, Collections.singletonList(new Problem(error, e))));
+            return Either.left(new FailedOperation(error, List.of(new Problem(error, e))));
         }
     }
 
@@ -188,26 +167,48 @@ public class BucketManager {
     public Either<FailedOperation, Boolean> doesBucketExist(S3Client s3Client, @NotBlank String bucketName) {
         try {
             logger.info("Checking if bucket '{}' exists.", bucketName);
-            s3Client.getBucketAcl(r -> r.bucket(bucketName));
-            logger.info("Bucket '{}' exists.", bucketName);
+            boolean bucketExists = s3Client.listBuckets().buckets().stream()
+                    .anyMatch(bucket -> bucket.name().equalsIgnoreCase(bucketName));
 
-            return Either.right(true);
-        } catch (AwsServiceException awsEx) {
-            if (awsEx.statusCode() == HttpStatusCode.NOT_FOUND) {
-                logger.info("Bucket '{}' does not exist.", bucketName);
-                return Either.right(false);
-            }
-            String error = String.format(
-                    "[Bucket %s] Error: An AWS service error occurred while checking the bucket existence. Please try again later. If the issue still persists, contact the platform team for assistance! Details: %s",
-                    bucketName, awsEx.getMessage());
-            logger.error(error, awsEx);
-            return Either.left(new FailedOperation(error, Collections.singletonList(new Problem(error, awsEx))));
+            logger.info("Does bucket '{}' exist? {}", bucketName, bucketExists);
+
+            return Either.right(bucketExists);
         } catch (Exception e) {
             String error = String.format(
-                    "[Bucket: %s] Error: An unexpected error occurred while checking the bucket existence. Please try again later. If the issue still persists, contact the platform team for assistance! Details: %s",
+                    "[Bucket: %s] Error: An unexpected error occurred while checking the bucket existence. Details: %s",
                     bucketName, e.getMessage());
             logger.error(error, e);
-            return Either.left(new FailedOperation(error, Collections.singletonList(new Problem(error, e))));
+            return Either.left(new FailedOperation(error, List.of(new Problem(error, e))));
+        }
+    }
+
+    /**
+     * Retrieves the AWS region where the specified bucket is located.
+     * This operation returns the region or an error if the region cannot be retrieved.
+     *
+     * @param s3Client   the {@link S3Client} used to perform the operation.
+     * @param bucketName the name of the bucket.
+     * @return an {@link Either} containing the region name or a {@link FailedOperation} in case of error.
+     */
+    public Either<FailedOperation, String> getBucketRegion(@NotNull S3Client s3Client, @NotBlank String bucketName) {
+        try {
+            logger.debug("Retrieving region for bucket '{}'.", bucketName);
+
+            GetBucketLocationResponse locationResponse = s3Client.getBucketLocation(
+                    GetBucketLocationRequest.builder().bucket(bucketName).build());
+
+            BucketLocationConstraint locationConstraint = locationResponse.locationConstraint();
+            String region = (locationConstraint == null) ? "us-east-1" : locationConstraint.toString();
+
+            logger.debug("Bucket '{}' is located in region '{}'.", bucketName, region);
+            return Either.right(region);
+
+        } catch (Exception e) {
+            String error = String.format(
+                    "[Bucket: %s] Error: An unexpected error occurred while getting the region of the bucket. Details: %s",
+                    bucketName, e.getMessage());
+            logger.error(error, e);
+            return Either.left(new FailedOperation(error, List.of(new Problem(error, e))));
         }
     }
 
@@ -244,10 +245,10 @@ public class BucketManager {
 
         } catch (Exception e) {
             String error = String.format(
-                    "[Bucket: %s, Folder: %s] Error: An unexpected error occurred while creating the folder. Please try again later. If the issue still persists, contact the platform team for assistance! Details: %s",
+                    "[Bucket: %s, Folder: %s] Error: An unexpected error occurred while creating the folder. Details: %s",
                     bucketName, folderPath, e.getMessage());
             logger.error(error, e);
-            return Either.left(new FailedOperation(error, Collections.singletonList(new Problem(error, e))));
+            return Either.left(new FailedOperation(error, List.of(new Problem(error, e))));
         }
     }
 
@@ -296,14 +297,14 @@ public class BucketManager {
                 String error = String.format(
                         "[Bucket '%s', Object '%s'] The object does not exist in the bucket or an unexpected condition occurred.",
                         bucketName, objectKey);
-                return Either.left(new FailedOperation(error, Collections.singletonList(new Problem(error))));
+                return Either.left(new FailedOperation(error, List.of(new Problem(error))));
             }
         } catch (Exception e) {
             String error = String.format(
                     "[Bucket '%s', Object '%s'] An error occurred while waiting for object to exist in bucket. Details %s",
                     bucketName, objectKey, e.getMessage());
             logger.error(error, e);
-            return Either.left(new FailedOperation(error, Collections.singletonList(new Problem(error, e))));
+            return Either.left(new FailedOperation(error, List.of(new Problem(error, e))));
         }
     }
 
@@ -344,16 +345,16 @@ public class BucketManager {
 
         } catch (AwsServiceException awsEx) {
             String error = String.format(
-                    "[Bucket: '%s', Prefix: '%s'] An AWS service error occurred during object deletion. Please try again later. If the issue still persists, contact the platform team for assistance! Details: %s",
+                    "[Bucket: '%s', Prefix: '%s'] An AWS service error occurred during object deletion. Details: %s",
                     bucketName, prefix, awsEx.awsErrorDetails().errorMessage());
             logger.error(error, awsEx);
-            return Either.left(new FailedOperation(error, Collections.singletonList(new Problem(error, awsEx))));
+            return Either.left(new FailedOperation(error, List.of(new Problem(error, awsEx))));
         } catch (Exception e) {
             String error = String.format(
-                    "[Bucket: '%s', Prefix: '%s'] An unexpected error occurred during object deletion. Please try again later. If the issue still persists, contact the platform team for assistance! Details: %s",
+                    "[Bucket: '%s', Prefix: '%s'] An unexpected error occurred during object deletion. Details: %s",
                     bucketName, prefix, e.getMessage());
             logger.error(error, e);
-            return Either.left(new FailedOperation(error, Collections.singletonList(new Problem(error, e))));
+            return Either.left(new FailedOperation(error, List.of(new Problem(error, e))));
         }
     }
 

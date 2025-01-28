@@ -8,9 +8,10 @@ import com.witboost.provisioning.model.request.ProvisionOperationRequest;
 import com.witboost.provisioning.model.status.ProvisionInfo;
 import com.witboost.provisioning.s3.client.BucketManager;
 import com.witboost.provisioning.s3.model.S3Specific;
+import com.witboost.provisioning.s3.utils.S3Utils;
 import io.vavr.control.Either;
 import jakarta.validation.Valid;
-import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
@@ -47,18 +48,19 @@ public class StorageAreaProvisionService implements ProvisionService {
         // Get the S3Client from the provider (cached or new)
         S3Client s3Client = s3ClientProvider.apply(region);
 
-        String bucketName = getBucketName(operationRequest);
+        String bucketName = S3Utils.computeBucketName(operationRequest.getDataProduct(), component.get());
 
-        Either<FailedOperation, Void> bucketCreationResult =
-                bucketManager.createBucket(s3Client, bucketName, region.id());
+        Either<FailedOperation, Void> bucketCreationResult = bucketManager.createBucket(
+                s3Client, bucketName, region.id(), s3Specific.get().getMultipleVersion());
 
         if (bucketCreationResult.isLeft()) return Either.left(bucketCreationResult.getLeft());
 
-        var componentName = component.get().getName();
-        var location = new StringBuilder("s3://").append(bucketName).append("/").append(componentName);
+        String[] componentIdParts = component.get().getId().split(":");
+        String folderName = componentIdParts[componentIdParts.length - 1];
+        var location = new StringBuilder("s3://").append(bucketName).append("/").append(folderName);
 
         Either<FailedOperation, Void> folderCreationResult =
-                bucketManager.createFolder(s3Client, bucketName, componentName);
+                bucketManager.createFolder(s3Client, bucketName, folderName);
 
         if (folderCreationResult.isLeft()) return Either.left(folderCreationResult.getLeft());
 
@@ -72,7 +74,7 @@ public class StorageAreaProvisionService implements ProvisionService {
                 Map.of(
                         "type", "string",
                         "label", "Folder name",
-                        "value", componentName),
+                        "value", folderName),
                 "location",
                 Map.of(
                         "type", "string",
@@ -84,7 +86,8 @@ public class StorageAreaProvisionService implements ProvisionService {
                 .publicInfo(Optional.of(info))
                 .build();
 
-        logger.info(String.format("Provisioning of %s completed successfully", componentName));
+        logger.info(String.format(
+                "Provisioning of %s completed successfully", component.get().getName()));
         return Either.right(provisionInfo);
     }
 
@@ -103,15 +106,16 @@ public class StorageAreaProvisionService implements ProvisionService {
         // Get the S3Client from the provider (cached or new)
         S3Client s3Client = s3ClientProvider.apply(region);
 
-        String bucketName = getBucketName(operationRequest);
+        String bucketName = S3Utils.computeBucketName(operationRequest.getDataProduct(), component.get());
 
         Either<FailedOperation, Boolean> bucketExists = bucketManager.doesBucketExist(s3Client, bucketName);
         if (bucketExists.isLeft()) return Either.left(bucketExists.getLeft());
 
-        var componentName = component.get().getName();
+        String[] componentIdParts = component.get().getId().split(":");
+        String folderName = componentIdParts[componentIdParts.length - 1];
 
         if (bucketExists.get()) {
-            var folderDeleted = bucketManager.deleteObjectsWithPrefix(s3Client, bucketName, componentName);
+            var folderDeleted = bucketManager.deleteObjectsWithPrefix(s3Client, bucketName, folderName);
 
             if (folderDeleted.isLeft()) return Either.left(folderDeleted.getLeft());
         }
@@ -124,14 +128,15 @@ public class StorageAreaProvisionService implements ProvisionService {
                         "label",
                         "Operation result",
                         "value",
-                        String.format("Folder: %s successfully deleted. Bucket: %s", componentName, bucketName)));
+                        String.format("Folder: %s successfully deleted. Bucket: %s", folderName, bucketName)));
 
         ProvisionInfo provisionInfo = ProvisionInfo.builder()
                 .privateInfo(Optional.of(info))
                 .publicInfo(Optional.of(info))
                 .build();
 
-        logger.info(String.format("Unprovisioning of %s completed successfully", componentName));
+        logger.info(String.format(
+                "Unprovisioning of %s completed successfully", component.get().getName()));
 
         return Either.right(provisionInfo);
     }
@@ -145,7 +150,7 @@ public class StorageAreaProvisionService implements ProvisionService {
 
         String error = String.format("Invalid Specific type of %s. Expected S3Specific.", component.getName());
         logger.error(error);
-        return Either.left(new FailedOperation(error, Collections.singletonList(new Problem(error))));
+        return Either.left(new FailedOperation(error, List.of(new Problem(error))));
     }
 
     private Either<FailedOperation, com.witboost.provisioning.model.Component<? extends Specific>> getComponent(
@@ -156,25 +161,9 @@ public class StorageAreaProvisionService implements ProvisionService {
             String error =
                     String.format("Invalid operation request: Component is missing. Request: %s", operationRequest);
             logger.error(error);
-            return Either.left(new FailedOperation(error, Collections.singletonList(new Problem(error))));
+            return Either.left(new FailedOperation(error, List.of(new Problem(error))));
         }
 
         return Either.right(component.get());
-    }
-
-    private String getBucketName(ProvisionOperationRequest<?, ? extends Specific> operationRequest) {
-        var dataproduct = operationRequest.getDataProduct();
-        String domainName = dataproduct.getDomain();
-        String dpName = dataproduct.getName();
-        String env = dataproduct.getEnvironment();
-        String bucketNameWithoutHash =
-                (domainName + "-" + dpName + "-" + env).replaceAll("\\s+", "").toLowerCase();
-        int hash = bucketNameWithoutHash.hashCode();
-
-        // Bucket names must be between 3 (min) and 63 (max) characters long.
-        if (bucketNameWithoutHash.length() > 58)
-            return bucketNameWithoutHash.substring(0, 58) + String.valueOf(hash).substring(0, 5);
-
-        return bucketNameWithoutHash + String.valueOf(hash).substring(0, 5);
     }
 }

@@ -11,11 +11,6 @@ public class S3Specific extends Specific {
     private String region;
 
     private Boolean multipleVersion;
-    private String accountId;
-
-    public String getAccountId() {
-        return accountId;
-    }
 
     public String getRegion() {
         return region;
@@ -23,10 +18,6 @@ public class S3Specific extends Specific {
 
     public Boolean getMultipleVersion() {
         return multipleVersion;
-    }
-
-    public void setAccountId(String accountId) {
-        this.accountId = accountId;
     }
 
     public void setMultipleVersion(Boolean multipleVersion) {

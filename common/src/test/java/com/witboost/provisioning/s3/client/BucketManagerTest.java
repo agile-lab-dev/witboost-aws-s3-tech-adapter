@@ -9,7 +9,6 @@ import io.vavr.control.Either;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
-import java.util.function.Consumer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.*;
@@ -118,13 +117,7 @@ public class BucketManagerTest {
         String bucketName = "my-bucket";
         String region = "us-east-1";
 
-        when(s3Client.getBucketAcl(any(Consumer.class)))
-                .thenThrow(AwsServiceException.builder()
-                        .statusCode(404)
-                        .awsErrorDetails(AwsErrorDetails.builder()
-                                .errorMessage("Bucket not found")
-                                .build())
-                        .build());
+        when(s3Client.listBuckets()).thenReturn(mock(ListBucketsResponse.class));
 
         when(s3Client.createBucket(any(CreateBucketRequest.class))).thenReturn(mock(CreateBucketResponse.class));
         S3Waiter s3Waiter = mock(S3Waiter.class);
@@ -139,7 +132,7 @@ public class BucketManagerTest {
         Optional<HeadBucketResponse> response = Optional.of(mock(HeadBucketResponse.class));
         when(responseOrException.response()).thenReturn(response);
 
-        Either<FailedOperation, Void> result = bucketManager.createBucket(s3Client, bucketName, region);
+        Either<FailedOperation, Void> result = bucketManager.createBucket(s3Client, bucketName, region, true);
 
         assertTrue(result.isRight());
         verify(s3Client, times(1)).createBucket(any(CreateBucketRequest.class));
@@ -150,21 +143,14 @@ public class BucketManagerTest {
         String bucketName = "my-bucket";
         String region = "us-east-1";
 
-        when(s3Client.getBucketAcl(any(Consumer.class)))
-                .thenThrow(AwsServiceException.builder()
-                        .statusCode(404)
-                        .awsErrorDetails(AwsErrorDetails.builder()
-                                .errorMessage("Bucket not found")
-                                .build())
-                        .build());
-
+        when(s3Client.listBuckets()).thenReturn(mock(ListBucketsResponse.class));
         when(s3Client.createBucket(any(CreateBucketRequest.class))).thenReturn(mock(CreateBucketResponse.class));
         S3Waiter s3Waiter = mock(S3Waiter.class);
         when(s3Client.waiter()).thenReturn(s3Waiter);
         when(s3Waiter.waitUntilBucketExists(any(HeadBucketRequest.class), any(WaiterOverrideConfiguration.class)))
                 .thenThrow(new RuntimeException("runtime exception"));
 
-        Either<FailedOperation, Void> result = bucketManager.createBucket(s3Client, bucketName, region);
+        Either<FailedOperation, Void> result = bucketManager.createBucket(s3Client, bucketName, region, false);
 
         assertTrue(result.isLeft());
         assertNotNull(result.getLeft());
@@ -179,7 +165,11 @@ public class BucketManagerTest {
         String bucketName = "my-bucket";
         String region = "us-east-1";
 
-        when(s3Client.getBucketAcl(any(GetBucketAclRequest.class))).thenReturn(mock(GetBucketAclResponse.class));
+        ListBucketsResponse listBucketsResponse = mock(ListBucketsResponse.class);
+        when(s3Client.listBuckets()).thenReturn(listBucketsResponse);
+        List<Bucket> bucketList = List.of(Bucket.builder().name(bucketName).build());
+        when(listBucketsResponse.buckets()).thenReturn(bucketList);
+
         GetBucketLocationResponse getBucketLocationResponse = mock(GetBucketLocationResponse.class);
         when(getBucketLocationResponse.locationConstraint()).thenReturn(null);
         when(s3Client.getBucketLocation(any(GetBucketLocationRequest.class))).thenReturn(getBucketLocationResponse);
@@ -193,7 +183,7 @@ public class BucketManagerTest {
         var responseOrException = mock(ResponseOrException.class);
         when(waiterResponse.matched()).thenReturn(responseOrException);
 
-        Either<FailedOperation, Void> result = bucketManager.createBucket(s3Client, bucketName, region);
+        Either<FailedOperation, Void> result = bucketManager.createBucket(s3Client, bucketName, region, false);
 
         assertTrue(result.isRight());
     }
@@ -203,12 +193,15 @@ public class BucketManagerTest {
         String bucketName = "my-bucket";
         String region = "us-west-2";
 
-        when(s3Client.getBucketAcl(any(GetBucketAclRequest.class))).thenReturn(mock(GetBucketAclResponse.class));
+        ListBucketsResponse listBucketsResponse = mock(ListBucketsResponse.class);
+        when(s3Client.listBuckets()).thenReturn(listBucketsResponse);
+        List<Bucket> bucketList = List.of(Bucket.builder().name(bucketName).build());
+        when(listBucketsResponse.buckets()).thenReturn(bucketList);
         GetBucketLocationResponse getBucketLocationResponse = mock(GetBucketLocationResponse.class);
         when(getBucketLocationResponse.locationConstraint()).thenReturn(BucketLocationConstraint.EU_CENTRAL_1);
         when(s3Client.getBucketLocation(any(GetBucketLocationRequest.class))).thenReturn(getBucketLocationResponse);
 
-        Either<FailedOperation, Void> result = bucketManager.createBucket(s3Client, bucketName, region);
+        Either<FailedOperation, Void> result = bucketManager.createBucket(s3Client, bucketName, region, false);
 
         assertTrue(result.isLeft());
         assertNotNull(result.getLeft());
@@ -220,10 +213,9 @@ public class BucketManagerTest {
         String bucketName = "my-bucket";
         String region = "us-west-2";
 
-        when(s3Client.getBucketAcl(any(GetBucketAclRequest.class))).thenReturn(mock(GetBucketAclResponse.class));
-        when(s3Client.getBucketAcl(any(Consumer.class))).thenThrow(new RuntimeException("runtime exception"));
+        when(s3Client.listBuckets()).thenThrow(new RuntimeException("runtime exception"));
 
-        Either<FailedOperation, Void> result = bucketManager.createBucket(s3Client, bucketName, region);
+        Either<FailedOperation, Void> result = bucketManager.createBucket(s3Client, bucketName, region, false);
 
         assertTrue(result.isLeft());
         assertNotNull(result.getLeft());
@@ -239,10 +231,15 @@ public class BucketManagerTest {
         String bucketName = "my-bucket";
         String region = "us-west-2";
 
+        ListBucketsResponse listBucketsResponse = mock(ListBucketsResponse.class);
+        when(s3Client.listBuckets()).thenReturn(listBucketsResponse);
+        List<Bucket> bucketList = List.of(Bucket.builder().name(bucketName).build());
+        when(listBucketsResponse.buckets()).thenReturn(bucketList);
+
         when(s3Client.getBucketLocation(any(GetBucketLocationRequest.class)))
                 .thenThrow(new RuntimeException("runtime exception"));
 
-        Either<FailedOperation, Void> result = bucketManager.createBucket(s3Client, bucketName, region);
+        Either<FailedOperation, Void> result = bucketManager.createBucket(s3Client, bucketName, region, false);
 
         assertTrue(result.isLeft());
         assertNotNull(result.getLeft());
@@ -258,13 +255,7 @@ public class BucketManagerTest {
         String bucketName = "my-bucket";
         String region = "us-east-1";
 
-        when(s3Client.getBucketAcl(any(Consumer.class)))
-                .thenThrow(AwsServiceException.builder()
-                        .statusCode(404)
-                        .awsErrorDetails(AwsErrorDetails.builder()
-                                .errorMessage("Bucket not found")
-                                .build())
-                        .build());
+        when(s3Client.listBuckets()).thenReturn(mock(ListBucketsResponse.class));
 
         when(s3Client.createBucket(any(CreateBucketRequest.class)))
                 .thenThrow(new RuntimeException("runtime exception"));
@@ -276,7 +267,7 @@ public class BucketManagerTest {
         var responseOrException = mock(ResponseOrException.class);
         when(waiterResponse.matched()).thenReturn(responseOrException);
 
-        Either<FailedOperation, Void> result = bucketManager.createBucket(s3Client, bucketName, region);
+        Either<FailedOperation, Void> result = bucketManager.createBucket(s3Client, bucketName, region, false);
 
         assertTrue(result.isLeft());
         assertNotNull(result.getLeft());
@@ -293,6 +284,24 @@ public class BucketManagerTest {
                 .contents(S3Object.builder().key(prefix + "file1.txt").build())
                 .build();
         when(s3Client.listObjectsV2(any(ListObjectsV2Request.class))).thenReturn(listResponse);
+        DeleteObjectsResponse deleteObjectsResponse = mock(DeleteObjectsResponse.class);
+        when(s3Client.deleteObjects(any(DeleteObjectsRequest.class))).thenReturn(deleteObjectsResponse);
+
+        Either<FailedOperation, Void> result = bucketManager.deleteObjectsWithPrefix(s3Client, bucketName, prefix);
+
+        assertTrue(result.isRight());
+        verify(s3Client, times(1)).deleteObjects(any(DeleteObjectsRequest.class));
+    }
+
+    @Test
+    public void testDeleteObjectsWithPrefix_success_emptyList() {
+        String bucketName = "my-bucket";
+        String prefix = "my-prefix/";
+
+        ListObjectsV2Response listResponse = ListObjectsV2Response.builder()
+                .contents(S3Object.builder().key(prefix + "file1.txt").build())
+                .build();
+        when(s3Client.listObjectsV2(any(ListObjectsV2Request.class))).thenReturn(mock(ListObjectsV2Response.class));
         DeleteObjectsResponse deleteObjectsResponse = mock(DeleteObjectsResponse.class);
         when(s3Client.deleteObjects(any(DeleteObjectsRequest.class))).thenReturn(deleteObjectsResponse);
 
@@ -472,25 +481,5 @@ public class BucketManagerTest {
                 .message()
                 .contains(
                         "[Bucket 'test-bucket', Object 'test-object'] An error occurred while waiting for object to exist");
-    }
-
-    @Test
-    void testDoesBucketExist_failure_AWSexception() {
-        String bucketName = "my-bucket";
-
-        when(s3Client.getBucketAcl(any(Consumer.class)))
-                .thenThrow(AwsServiceException.builder()
-                        .statusCode(500)
-                        .awsErrorDetails(
-                                AwsErrorDetails.builder().errorMessage("Error").build())
-                        .build());
-
-        Either<FailedOperation, Boolean> result = bucketManager.doesBucketExist(s3Client, bucketName);
-
-        assertTrue(result.isLeft(), "Expected operation to fail due to exception.");
-        assert result.getLeft()
-                .message()
-                .contains(
-                        "[Bucket my-bucket] Error: An AWS service error occurred while checking the bucket existence.");
     }
 }
