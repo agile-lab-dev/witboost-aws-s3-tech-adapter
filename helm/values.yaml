@@ -40,7 +40,7 @@ livenessProbe: {}
 
 # -- security context spec
 securityContext:
-  runAsUser: 1001
+  runAsUser: 1000
   allowPrivilegeEscalation: false
   runAsNonRoot: true
 

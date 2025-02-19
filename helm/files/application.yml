@@ -5,6 +5,7 @@ spring:
 logging:
   level:
     org.zalando.logbook: TRACE
+    org.slf4j.simpleLogger.log.software.amazon.awssdk.auth.credentials: DEBUG
 
 logbook:
   obfuscate:
