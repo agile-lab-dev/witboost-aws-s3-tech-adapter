@@ -11,3 +11,11 @@ data:
   {{- else -}}
   {{- .Files.Get "files/application.yml" | nindent 4 }}
   {{ end }}
+  {{- if .Values.kmsPolicyOverride -}}
+  kmsPolicy.json: |
+  {{- .Values.kmsPolicyOverride | nindent 4 }}
+  {{ end }}
+  {{- if .Values.bucketPolicyOverride -}}
+  bucketPolicy.json: |
+  {{- .Values.bucketPolicyOverride | nindent 4 }}
+  {{ end }}

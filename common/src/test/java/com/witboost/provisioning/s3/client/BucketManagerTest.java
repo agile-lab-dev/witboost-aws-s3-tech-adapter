@@ -5,46 +5,101 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 import com.witboost.provisioning.model.common.FailedOperation;
+import com.witboost.provisioning.s3.model.BucketTag;
+import com.witboost.provisioning.s3.model.LifeCycleConfiguration;
+import com.witboost.provisioning.s3.model.LifeCycleConfigurationPermanentlyDelete;
+import com.witboost.provisioning.s3.model.S3Specific;
 import io.vavr.control.Either;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.*;
 import org.mockito.Mock;
+import org.mockito.MockedStatic;
 import org.mockito.MockitoAnnotations;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import software.amazon.awssdk.awscore.exception.AwsErrorDetails;
 import software.amazon.awssdk.awscore.exception.AwsServiceException;
 import software.amazon.awssdk.core.internal.waiters.ResponseOrException;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.core.waiters.WaiterOverrideConfiguration;
 import software.amazon.awssdk.core.waiters.WaiterResponse;
+import software.amazon.awssdk.services.kms.KmsClient;
+import software.amazon.awssdk.services.kms.model.CreateKeyRequest;
+import software.amazon.awssdk.services.kms.model.CreateKeyResponse;
+import software.amazon.awssdk.services.kms.model.KeyMetadata;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
 import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
 import software.amazon.awssdk.services.s3.model.HeadBucketResponse;
 import software.amazon.awssdk.services.s3.waiters.S3Waiter;
+import software.amazon.awssdk.services.sts.StsClient;
 
 @SpringBootTest
 public class BucketManagerTest {
 
     @Mock
+    private KmsClient kmsClient;
+
+    @Mock
     private S3Client s3Client;
+
+    @MockitoBean
+    private StsClient stsClient;
 
     @Autowired
     private BucketManager bucketManager;
 
+    private S3Specific s3Specific;
+
+    private MockedStatic<Files> mockedFiles;
+
+    private String bucketName = "my-bucket";
+
     @BeforeEach
     public void setUp() {
+
         MockitoAnnotations.openMocks(this);
+
+        mockedFiles = mockStatic(Files.class);
+        mockedFiles
+                .when(() -> Files.readAllBytes(any(Path.class)))
+                .thenReturn("{\"Statement\": [{\"Effect\": \"Allow\"}]}".getBytes());
+        String region = "us-east-1";
+
+        BucketTag tag = new BucketTag();
+        tag.setKey("tagKey");
+        tag.setValue("tagValue");
+
+        s3Specific = new S3Specific();
+        s3Specific.setRegion(region);
+        s3Specific.setMultipleVersion(true);
+        s3Specific.setBucketTags(List.of(tag));
+        s3Specific.setServerSideEncryption(ServerSideEncryption.AES256);
+        LifeCycleConfiguration lifeCycleConfiguration = new LifeCycleConfiguration();
+        LifeCycleConfigurationPermanentlyDelete lifeCycleConfigurationPermanentlyDelete =
+                new LifeCycleConfigurationPermanentlyDelete();
+        lifeCycleConfigurationPermanentlyDelete.setDaysAfterBecomeNonCurrent(15);
+        lifeCycleConfigurationPermanentlyDelete.setNumberOfVersionsToRetain(8);
+        lifeCycleConfiguration.setPermanentlyDelete(lifeCycleConfigurationPermanentlyDelete);
+        s3Specific.setLifeCycleConfiguration(lifeCycleConfiguration);
+    }
+
+    @AfterEach
+    void tearDown() {
+        mockedFiles.close();
     }
 
     @Test
     public void testCreateFolder_success() {
-        String bucketName = "my-bucket";
         String folderPath = "my-folder";
 
         when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
@@ -70,7 +125,6 @@ public class BucketManagerTest {
 
     @Test
     public void testCreateFolder_failure_objectNotExists() {
-        String bucketName = "my-bucket";
         String folderPath = "my-folder/";
 
         when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
@@ -98,7 +152,6 @@ public class BucketManagerTest {
 
     @Test
     public void testCreateFolder_failure() {
-        String bucketName = "my-bucket";
         String folderPath = "my-folder";
 
         doThrow(new RuntimeException("S3 service unavailable"))
@@ -113,10 +166,39 @@ public class BucketManagerTest {
     }
 
     @Test
-    public void testCreateBucket_success() {
-        String bucketName = "my-bucket";
-        String region = "us-east-1";
+    public void testCreateOrUpdateBucket_success() {
+        s3Specific.setBucketTags(null);
+        s3Specific.setServerSideEncryption(ServerSideEncryption.AWS_KMS);
+        when(s3Client.listBuckets()).thenReturn(mock(ListBucketsResponse.class));
 
+        when(s3Client.createBucket(any(CreateBucketRequest.class))).thenReturn(mock(CreateBucketResponse.class));
+        S3Waiter s3Waiter = mock(S3Waiter.class);
+        when(s3Client.waiter()).thenReturn(s3Waiter);
+        var waiterResponse = mock(WaiterResponse.class);
+        when(s3Waiter.waitUntilBucketExists(any(HeadBucketRequest.class), any(WaiterOverrideConfiguration.class)))
+                .thenReturn(waiterResponse);
+
+        CreateKeyResponse createKeyResponse = CreateKeyResponse.builder()
+                .keyMetadata(KeyMetadata.builder().keyId("testKeyId").build())
+                .build();
+
+        when(kmsClient.createKey(any(CreateKeyRequest.class))).thenReturn(createKeyResponse);
+
+        ResponseOrException<HeadBucketResponse> responseOrException = mock(ResponseOrException.class);
+        when(waiterResponse.matched()).thenReturn(responseOrException);
+
+        Optional<HeadBucketResponse> response = Optional.of(mock(HeadBucketResponse.class));
+        when(responseOrException.response()).thenReturn(response);
+
+        Either<FailedOperation, Void> result =
+                bucketManager.createOrUpdateBucket(s3Client, kmsClient, bucketName, s3Specific, "accountId");
+
+        assertTrue(result.isRight());
+        verify(s3Client, times(1)).createBucket(any(CreateBucketRequest.class));
+    }
+
+    @Test
+    public void testCreateOrUpdateBucketNoMultipleVersioning_errorPuttingBucketTags() {
         when(s3Client.listBuckets()).thenReturn(mock(ListBucketsResponse.class));
 
         when(s3Client.createBucket(any(CreateBucketRequest.class))).thenReturn(mock(CreateBucketResponse.class));
@@ -132,17 +214,58 @@ public class BucketManagerTest {
         Optional<HeadBucketResponse> response = Optional.of(mock(HeadBucketResponse.class));
         when(responseOrException.response()).thenReturn(response);
 
-        Either<FailedOperation, Void> result = bucketManager.createBucket(s3Client, bucketName, region, true);
+        when(s3Client.putBucketTagging(any(PutBucketTaggingRequest.class)))
+                .thenThrow(new RuntimeException("runtime exception"));
+
+        GetBucketLocationResponse getBucketLocationResponse = mock(GetBucketLocationResponse.class);
+        when(getBucketLocationResponse.locationConstraint()).thenReturn(BucketLocationConstraint.EU_CENTRAL_1);
+        when(s3Client.getBucketLocation(any(GetBucketLocationRequest.class))).thenReturn(getBucketLocationResponse);
+
+        s3Specific.setMultipleVersion(false);
+        Either<FailedOperation, Void> result =
+                bucketManager.createOrUpdateBucket(s3Client, kmsClient, bucketName, s3Specific, "accountId");
+
+        assertTrue(result.isLeft());
+        assertNotNull(result.getLeft());
+
+        System.out.println(result.getLeft());
+        assert result.getLeft()
+                .message()
+                .contains(
+                        "[Bucket: my-bucket] Error: An unexpected error occurred while applying tags to the bucket. Details: runtime exception");
+    }
+
+    @Test
+    public void testCreateOrUpdateBucketNoMultipleVersioning_success() {
+        when(s3Client.listBuckets()).thenReturn(mock(ListBucketsResponse.class));
+
+        when(s3Client.createBucket(any(CreateBucketRequest.class))).thenReturn(mock(CreateBucketResponse.class));
+        S3Waiter s3Waiter = mock(S3Waiter.class);
+        when(s3Client.waiter()).thenReturn(s3Waiter);
+        var waiterResponse = mock(WaiterResponse.class);
+        when(s3Waiter.waitUntilBucketExists(any(HeadBucketRequest.class), any(WaiterOverrideConfiguration.class)))
+                .thenReturn(waiterResponse);
+
+        ResponseOrException<HeadBucketResponse> responseOrException = mock(ResponseOrException.class);
+        when(waiterResponse.matched()).thenReturn(responseOrException);
+
+        Optional<HeadBucketResponse> response = Optional.of(mock(HeadBucketResponse.class));
+        when(responseOrException.response()).thenReturn(response);
+
+        GetBucketLocationResponse getBucketLocationResponse = mock(GetBucketLocationResponse.class);
+        when(getBucketLocationResponse.locationConstraint()).thenReturn(BucketLocationConstraint.EU_CENTRAL_1);
+        when(s3Client.getBucketLocation(any(GetBucketLocationRequest.class))).thenReturn(getBucketLocationResponse);
+
+        s3Specific.setMultipleVersion(false);
+        Either<FailedOperation, Void> result =
+                bucketManager.createOrUpdateBucket(s3Client, kmsClient, bucketName, s3Specific, "accountId");
 
         assertTrue(result.isRight());
         verify(s3Client, times(1)).createBucket(any(CreateBucketRequest.class));
     }
 
     @Test
-    public void testCreateBucket_failure_errorWaitingForBucket() {
-        String bucketName = "my-bucket";
-        String region = "us-east-1";
-
+    public void testCreateBucket_failure_errorWaitingForOrUpdateBucket() {
         when(s3Client.listBuckets()).thenReturn(mock(ListBucketsResponse.class));
         when(s3Client.createBucket(any(CreateBucketRequest.class))).thenReturn(mock(CreateBucketResponse.class));
         S3Waiter s3Waiter = mock(S3Waiter.class);
@@ -150,7 +273,8 @@ public class BucketManagerTest {
         when(s3Waiter.waitUntilBucketExists(any(HeadBucketRequest.class), any(WaiterOverrideConfiguration.class)))
                 .thenThrow(new RuntimeException("runtime exception"));
 
-        Either<FailedOperation, Void> result = bucketManager.createBucket(s3Client, bucketName, region, false);
+        Either<FailedOperation, Void> result =
+                bucketManager.createOrUpdateBucket(s3Client, kmsClient, bucketName, s3Specific, "accountId");
 
         assertTrue(result.isLeft());
         assertNotNull(result.getLeft());
@@ -161,38 +285,26 @@ public class BucketManagerTest {
     }
 
     @Test
-    public void testCreateBucket_success_existingBucketInRegion() {
-        String bucketName = "my-bucket";
-        String region = "us-east-1";
+    void testCreateBucket_success_existingOrUpdateBucketInRegion() {
+        s3Specific.setRegion("eu-central-1");
 
-        ListBucketsResponse listBucketsResponse = mock(ListBucketsResponse.class);
-        when(s3Client.listBuckets()).thenReturn(listBucketsResponse);
-        List<Bucket> bucketList = List.of(Bucket.builder().name(bucketName).build());
-        when(listBucketsResponse.buckets()).thenReturn(bucketList);
-
+        when(s3Client.listBuckets())
+                .thenReturn(ListBucketsResponse.builder()
+                        .buckets(Bucket.builder().name(bucketName).build())
+                        .build());
         GetBucketLocationResponse getBucketLocationResponse = mock(GetBucketLocationResponse.class);
-        when(getBucketLocationResponse.locationConstraint()).thenReturn(null);
+        when(getBucketLocationResponse.locationConstraint()).thenReturn(BucketLocationConstraint.EU_CENTRAL_1);
         when(s3Client.getBucketLocation(any(GetBucketLocationRequest.class))).thenReturn(getBucketLocationResponse);
 
-        when(s3Client.createBucket(any(CreateBucketRequest.class))).thenReturn(mock(CreateBucketResponse.class));
-        S3Waiter s3Waiter = mock(S3Waiter.class);
-        when(s3Client.waiter()).thenReturn(s3Waiter);
-        var waiterResponse = mock(WaiterResponse.class);
-        when(s3Waiter.waitUntilBucketExists(any(HeadBucketRequest.class), any(WaiterOverrideConfiguration.class)))
-                .thenReturn(waiterResponse);
-        var responseOrException = mock(ResponseOrException.class);
-        when(waiterResponse.matched()).thenReturn(responseOrException);
-
-        Either<FailedOperation, Void> result = bucketManager.createBucket(s3Client, bucketName, region, false);
+        Either<FailedOperation, Void> result =
+                bucketManager.createOrUpdateBucket(s3Client, kmsClient, bucketName, s3Specific, "accountId");
 
         assertTrue(result.isRight());
+        verify(s3Client, times(1)).putBucketPolicy(any(PutBucketPolicyRequest.class));
     }
 
     @Test
-    public void testCreateBucket_failure_existingBucketInAnotherRegion() {
-        String bucketName = "my-bucket";
-        String region = "us-west-2";
-
+    public void testCreateBucket_failure_existingOrUpdateBucketInAnotherRegion() {
         ListBucketsResponse listBucketsResponse = mock(ListBucketsResponse.class);
         when(s3Client.listBuckets()).thenReturn(listBucketsResponse);
         List<Bucket> bucketList = List.of(Bucket.builder().name(bucketName).build());
@@ -201,21 +313,23 @@ public class BucketManagerTest {
         when(getBucketLocationResponse.locationConstraint()).thenReturn(BucketLocationConstraint.EU_CENTRAL_1);
         when(s3Client.getBucketLocation(any(GetBucketLocationRequest.class))).thenReturn(getBucketLocationResponse);
 
-        Either<FailedOperation, Void> result = bucketManager.createBucket(s3Client, bucketName, region, false);
+        Either<FailedOperation, Void> result =
+                bucketManager.createOrUpdateBucket(s3Client, kmsClient, bucketName, s3Specific, "accountId");
 
         assertTrue(result.isLeft());
         assertNotNull(result.getLeft());
-        assert result.getLeft().message().contains("The bucket already exists in a different region (eu-central-1)");
+        assert result.getLeft()
+                .message()
+                .contains(
+                        "The bucket already exists in region eu-central-1 and cannot be created or updated in region us-east-1.");
     }
 
     @Test
-    public void testCreateBucket_failure_errorInBucketExists() {
-        String bucketName = "my-bucket";
-        String region = "us-west-2";
-
+    public void testCreateBucket_failure_errorInOrUpdateBucketExists() {
         when(s3Client.listBuckets()).thenThrow(new RuntimeException("runtime exception"));
 
-        Either<FailedOperation, Void> result = bucketManager.createBucket(s3Client, bucketName, region, false);
+        Either<FailedOperation, Void> result =
+                bucketManager.createOrUpdateBucket(s3Client, kmsClient, bucketName, s3Specific, "accountId");
 
         assertTrue(result.isLeft());
         assertNotNull(result.getLeft());
@@ -227,10 +341,7 @@ public class BucketManagerTest {
     }
 
     @Test
-    public void testCreateBucket_failure_errorGettingRegion() {
-        String bucketName = "my-bucket";
-        String region = "us-west-2";
-
+    public void testCreateOrUpdateBucket_failure_errorGettingRegion() {
         ListBucketsResponse listBucketsResponse = mock(ListBucketsResponse.class);
         when(s3Client.listBuckets()).thenReturn(listBucketsResponse);
         List<Bucket> bucketList = List.of(Bucket.builder().name(bucketName).build());
@@ -239,7 +350,9 @@ public class BucketManagerTest {
         when(s3Client.getBucketLocation(any(GetBucketLocationRequest.class)))
                 .thenThrow(new RuntimeException("runtime exception"));
 
-        Either<FailedOperation, Void> result = bucketManager.createBucket(s3Client, bucketName, region, false);
+        s3Specific.setRegion("us-west-2");
+        Either<FailedOperation, Void> result =
+                bucketManager.createOrUpdateBucket(s3Client, kmsClient, bucketName, s3Specific, "accountId");
 
         assertTrue(result.isLeft());
         assertNotNull(result.getLeft());
@@ -251,12 +364,8 @@ public class BucketManagerTest {
     }
 
     @Test
-    public void testCreateBucket_exception() {
-        String bucketName = "my-bucket";
-        String region = "us-east-1";
-
+    public void testCreateOrUpdateBucket_exception() {
         when(s3Client.listBuckets()).thenReturn(mock(ListBucketsResponse.class));
-
         when(s3Client.createBucket(any(CreateBucketRequest.class)))
                 .thenThrow(new RuntimeException("runtime exception"));
 
@@ -267,7 +376,8 @@ public class BucketManagerTest {
         var responseOrException = mock(ResponseOrException.class);
         when(waiterResponse.matched()).thenReturn(responseOrException);
 
-        Either<FailedOperation, Void> result = bucketManager.createBucket(s3Client, bucketName, region, false);
+        Either<FailedOperation, Void> result =
+                bucketManager.createOrUpdateBucket(s3Client, kmsClient, bucketName, s3Specific, "accountId");
 
         assertTrue(result.isLeft());
         assertNotNull(result.getLeft());
@@ -277,7 +387,6 @@ public class BucketManagerTest {
 
     @Test
     public void testDeleteObjectsWithPrefix_success() {
-        String bucketName = "my-bucket";
         String prefix = "my-prefix/";
 
         ListObjectsV2Response listResponse = ListObjectsV2Response.builder()
@@ -295,7 +404,7 @@ public class BucketManagerTest {
 
     @Test
     public void testDeleteObjectsWithPrefix_success_emptyList() {
-        String bucketName = "my-bucket";
+
         String prefix = "my-prefix/";
 
         ListObjectsV2Response listResponse = ListObjectsV2Response.builder()
@@ -313,7 +422,7 @@ public class BucketManagerTest {
 
     @Test
     public void testDeleteObjectsInBatches_withErrors() {
-        String bucketName = "my-bucket";
+
         List<ObjectIdentifier> objectIdentifiers = List.of(
                 ObjectIdentifier.builder().key("file1.txt").build(),
                 ObjectIdentifier.builder().key("file2.txt").build());
@@ -346,7 +455,6 @@ public class BucketManagerTest {
 
     @Test
     public void testDeleteObjectsWithPrefix_failure_emptyObjectIdentifiers() {
-        String bucketName = "my-bucket";
         String prefix = "my-prefix";
 
         ListObjectsV2Response listResponse = ListObjectsV2Response.builder()
@@ -365,7 +473,6 @@ public class BucketManagerTest {
 
     @Test
     public void testDeleteObjectsWithPrefix_failure_AWSException() {
-        String bucketName = "my-bucket";
         String prefix = "my-prefix/";
 
         when(s3Client.listObjectsV2(any(ListObjectsV2Request.class)))
@@ -385,7 +492,6 @@ public class BucketManagerTest {
 
     @Test
     public void testDeleteObjectsWithPrefix_failure_Exception() {
-        String bucketName = "my-bucket";
         String prefix = "my-prefix/";
 
         when(s3Client.listObjectsV2(any(ListObjectsV2Request.class)))
@@ -481,5 +587,394 @@ public class BucketManagerTest {
                 .message()
                 .contains(
                         "[Bucket 'test-bucket', Object 'test-object'] An error occurred while waiting for object to exist");
+    }
+
+    @Test
+    void testIsKmsEnabled_true() {
+        GetBucketEncryptionResponse encryptionResponse = GetBucketEncryptionResponse.builder()
+                .serverSideEncryptionConfiguration(ServerSideEncryptionConfiguration.builder()
+                        .rules(ServerSideEncryptionRule.builder()
+                                .applyServerSideEncryptionByDefault(ServerSideEncryptionByDefault.builder()
+                                        .sseAlgorithm(ServerSideEncryption.AWS_KMS)
+                                        .build())
+                                .build())
+                        .build())
+                .build();
+
+        boolean result = bucketManager.isKmsEnabled(encryptionResponse);
+        assertTrue(result, "Expected KMS to be enabled");
+    }
+
+    @Test
+    void testIsKmsEnabled_false() {
+        GetBucketEncryptionResponse encryptionResponse = GetBucketEncryptionResponse.builder()
+                .serverSideEncryptionConfiguration(ServerSideEncryptionConfiguration.builder()
+                        .rules(ServerSideEncryptionRule.builder()
+                                .applyServerSideEncryptionByDefault(ServerSideEncryptionByDefault.builder()
+                                        .sseAlgorithm(ServerSideEncryption.AES256)
+                                        .build())
+                                .build())
+                        .build())
+                .build();
+
+        boolean result = bucketManager.isKmsEnabled(encryptionResponse);
+        assertFalse(result, "Expected KMS to be disabled");
+    }
+
+    @Test
+    void testIsKmsEnabled_nullResponse() {
+        boolean result = bucketManager.isKmsEnabled(null);
+        assertFalse(result, "Expected KMS to be disabled with null response");
+    }
+
+    @Test
+    void testEnableBucketVersioning_exception() {
+        when(s3Client.putBucketVersioning(any(PutBucketVersioningRequest.class)))
+                .thenThrow(new RuntimeException("runtime exception"));
+        Either<FailedOperation, Void> result =
+                bucketManager.enableBucketVersioning(s3Client, "bucket", new LifeCycleConfiguration());
+
+        assertTrue(result.isLeft());
+        assertTrue(result.getLeft().message().contains("An unexpected error occurred while enabling versioning"));
+    }
+
+    @Test
+    void testEnableBucketVersioningNullPermanentDelete_exception() {
+        when(s3Client.putBucketVersioning(any(PutBucketVersioningRequest.class)))
+                .thenReturn(any(PutBucketVersioningResponse.class));
+        Either<FailedOperation, Void> result =
+                bucketManager.enableBucketVersioning(s3Client, "bucket", new LifeCycleConfiguration());
+
+        assertTrue(result.isRight());
+    }
+
+    @Test
+    void testApplyLifeCycleConfiguration_exception() {
+        when(s3Client.putBucketLifecycleConfiguration(any(PutBucketLifecycleConfigurationRequest.class)))
+                .thenThrow(new RuntimeException("runtime exception"));
+        Either<FailedOperation, Void> result =
+                bucketManager.applyLifeCycleConfiguration(s3Client, "bucket", new LifeCycleConfiguration());
+
+        assertTrue(result.isLeft());
+        assertTrue(result.getLeft()
+                .message()
+                .contains("An unexpected error occurred while applying lifecycle configuration."));
+    }
+
+    @Test
+    void testApplyBucketTags_success() {
+        String bucketName = "test-bucket";
+        BucketTag bucketTag1 = new BucketTag();
+        bucketTag1.setKey("key1");
+        bucketTag1.setValue("value1");
+
+        BucketTag bucketTag2 = new BucketTag();
+        bucketTag1.setKey("key2");
+        bucketTag1.setValue("value2");
+
+        List<BucketTag> tags = List.of(bucketTag1, bucketTag2);
+
+        bucketManager.applyBucketTags(s3Client, bucketName, tags);
+
+        verify(s3Client, times(1)).putBucketTagging(any(PutBucketTaggingRequest.class));
+    }
+
+    @Test
+    void testApplyBucketTags_emptyTags() {
+        String bucketName = "test-bucket";
+        List<BucketTag> tags = List.of();
+
+        bucketManager.applyBucketTags(s3Client, bucketName, tags);
+
+        verify(s3Client, never()).putBucketTagging(any(PutBucketTaggingRequest.class));
+    }
+
+    @Test
+    void testApplyBucketPolicyForSecureTransport_success() {
+        String bucketName = "test-bucket";
+
+        bucketManager.applyBucketPolicyForSecureTransport(s3Client, bucketName);
+
+        verify(s3Client, times(1)).putBucketPolicy(any(PutBucketPolicyRequest.class));
+    }
+
+    @Test
+    void testApplyBucketPolicyForSecureTransport_success_UsingCustomPolicyPath() {
+        String customPolicyPath = "/custom/path/bucket-policy.json";
+
+        System.setProperty("bucket.policy.path", customPolicyPath);
+        Either<FailedOperation, Void> result = bucketManager.applyBucketPolicyForSecureTransport(s3Client, bucketName);
+        assertTrue(result.isRight());
+        assertEquals(customPolicyPath, System.getProperty("bucket.policy.path"));
+        System.clearProperty("bucket.policy.path");
+    }
+
+    @Test
+    void testApplyBucketPolicyForSecureTransport_IOException() {
+        String bucketName = "test-bucket";
+        String customPolicyPath = "/custom/path/kms-policy.json";
+
+        System.setProperty("bucket.policy.path", customPolicyPath);
+
+        mockedFiles
+                .when(() -> Files.readAllBytes(Paths.get(customPolicyPath)))
+                .thenThrow(new IOException("IO Exception"));
+        Either<FailedOperation, Void> result = bucketManager.applyBucketPolicyForSecureTransport(s3Client, bucketName);
+
+        assertTrue(result.isLeft());
+        assertTrue(result.getLeft()
+                .message()
+                .contains(
+                        "An unexpected error occurred while applying secure transport policy. Details: IO Exception"));
+
+        System.clearProperty("kms.policy.path");
+    }
+
+    @Test
+    void testEnableAES256() {
+        String bucketName = "test-bucket";
+        bucketManager.enableAES256(s3Client, bucketName);
+
+        verify(s3Client, times(1)).putBucketEncryption(any(PutBucketEncryptionRequest.class));
+    }
+
+    @Test
+    void testEnableAES256_exception() {
+        String bucketName = "test-bucket";
+        when(s3Client.putBucketEncryption(any(PutBucketEncryptionRequest.class)))
+                .thenThrow(new RuntimeException("runtime exception"));
+        Either<FailedOperation, Void> result = bucketManager.enableAES256(s3Client, bucketName);
+
+        assertTrue(result.isLeft());
+        assertTrue(
+                result.getLeft().message().contains("An unexpected error occurred while enabling AES256 encryption."));
+    }
+
+    @Test
+    void testEnableKMS_KMSCurrentEncryption() {
+        String bucketName = "test-bucket";
+        s3Specific.setServerSideEncryption(ServerSideEncryption.AWS_KMS);
+
+        GetBucketEncryptionResponse encryptionResponse = GetBucketEncryptionResponse.builder()
+                .serverSideEncryptionConfiguration(ServerSideEncryptionConfiguration.builder()
+                        .rules(ServerSideEncryptionRule.builder()
+                                .applyServerSideEncryptionByDefault(ServerSideEncryptionByDefault.builder()
+                                        .sseAlgorithm(ServerSideEncryption.AWS_KMS)
+                                        .build())
+                                .build())
+                        .build())
+                .build();
+
+        when(s3Client.getBucketEncryption(any(GetBucketEncryptionRequest.class)))
+                .thenReturn(encryptionResponse);
+        Either<FailedOperation, Void> result =
+                bucketManager.enableKMS(s3Client, kmsClient, bucketName, s3Specific, "accountID");
+
+        assertTrue(result.isRight());
+        verify(s3Client, times(0)).putBucketEncryption(any(PutBucketEncryptionRequest.class));
+    }
+
+    @Test
+    void testEnableKMS_Exception() {
+        String bucketName = "test-bucket";
+        s3Specific.setServerSideEncryption(ServerSideEncryption.AWS_KMS);
+
+        when(s3Client.getBucketEncryption(any(GetBucketEncryptionRequest.class)))
+                .thenThrow(new RuntimeException("runtime exception"));
+        Either<FailedOperation, Void> result =
+                bucketManager.enableKMS(s3Client, kmsClient, bucketName, s3Specific, "accountID");
+
+        assertTrue(result.isLeft());
+        assertTrue(result.getLeft().message().contains("An unexpected error occurred while enabling KMS encryption"));
+    }
+
+    @Test
+    void testDoesBucketExist_true() {
+        String bucketName = "test-bucket";
+        ListBucketsResponse listBucketsResponse = mock(ListBucketsResponse.class);
+        when(s3Client.listBuckets()).thenReturn(listBucketsResponse);
+        when(listBucketsResponse.buckets())
+                .thenReturn(List.of(Bucket.builder().name(bucketName).build()));
+
+        Either<FailedOperation, Boolean> result = bucketManager.doesBucketExist(s3Client, bucketName);
+
+        assertTrue(result.isRight());
+        assertTrue(result.get(), "Expected bucket to exist");
+    }
+
+    @Test
+    void testDoesBucketExist_false() {
+        String bucketName = "test-bucket";
+        ListBucketsResponse listBucketsResponse = mock(ListBucketsResponse.class);
+        when(s3Client.listBuckets()).thenReturn(listBucketsResponse);
+        when(listBucketsResponse.buckets()).thenReturn(List.of());
+
+        Either<FailedOperation, Boolean> result = bucketManager.doesBucketExist(s3Client, bucketName);
+
+        assertTrue(result.isRight());
+        assertFalse(result.get(), "Expected bucket not to exist");
+    }
+
+    @Test
+    void testDoesBucketExist_exception() {
+        String bucketName = "test-bucket";
+        when(s3Client.listBuckets()).thenThrow(new RuntimeException("S3 error"));
+
+        Either<FailedOperation, Boolean> result = bucketManager.doesBucketExist(s3Client, bucketName);
+
+        assertTrue(result.isLeft());
+        assertNotNull(result.getLeft().message(), "Expected an error message");
+    }
+
+    @Test
+    public void testCreateOrUpdateBucket_failure_bucketPolicySecureTransport() {
+        when(s3Client.listBuckets()).thenReturn(mock(ListBucketsResponse.class));
+
+        when(s3Client.createBucket(any(CreateBucketRequest.class))).thenReturn(mock(CreateBucketResponse.class));
+        S3Waiter s3Waiter = mock(S3Waiter.class);
+        when(s3Client.waiter()).thenReturn(s3Waiter);
+        var waiterResponse = mock(WaiterResponse.class);
+        when(s3Waiter.waitUntilBucketExists(any(HeadBucketRequest.class), any(WaiterOverrideConfiguration.class)))
+                .thenReturn(waiterResponse);
+
+        ResponseOrException<HeadBucketResponse> responseOrException = mock(ResponseOrException.class);
+        when(waiterResponse.matched()).thenReturn(responseOrException);
+
+        Optional<HeadBucketResponse> response = Optional.of(mock(HeadBucketResponse.class));
+        when(responseOrException.response()).thenReturn(response);
+
+        doThrow(new RuntimeException("Bucket policy error"))
+                .when(s3Client)
+                .putBucketPolicy(any(PutBucketPolicyRequest.class));
+
+        Either<FailedOperation, Void> result =
+                bucketManager.createOrUpdateBucket(s3Client, kmsClient, bucketName, s3Specific, "accountId");
+
+        assertTrue(result.isLeft());
+        assertTrue(result.getLeft().message().contains("Bucket policy error"));
+    }
+
+    @Test
+    public void testCreateOrUpdateBucket_failure_enableKMS() {
+        when(s3Client.listBuckets()).thenReturn(mock(ListBucketsResponse.class));
+
+        when(s3Client.createBucket(any(CreateBucketRequest.class))).thenReturn(mock(CreateBucketResponse.class));
+        S3Waiter s3Waiter = mock(S3Waiter.class);
+        when(s3Client.waiter()).thenReturn(s3Waiter);
+        var waiterResponse = mock(WaiterResponse.class);
+        when(s3Waiter.waitUntilBucketExists(any(HeadBucketRequest.class), any(WaiterOverrideConfiguration.class)))
+                .thenReturn(waiterResponse);
+
+        CreateKeyResponse createKeyResponse = CreateKeyResponse.builder()
+                .keyMetadata(KeyMetadata.builder().keyId("testKeyId").build())
+                .build();
+
+        when(kmsClient.createKey(any(CreateKeyRequest.class))).thenReturn(createKeyResponse);
+
+        ResponseOrException<HeadBucketResponse> responseOrException = mock(ResponseOrException.class);
+        when(waiterResponse.matched()).thenReturn(responseOrException);
+
+        Optional<HeadBucketResponse> response = Optional.of(mock(HeadBucketResponse.class));
+        when(responseOrException.response()).thenReturn(response);
+
+        doThrow(new RuntimeException("KMS encryption error"))
+                .when(s3Client)
+                .putBucketEncryption(any(PutBucketEncryptionRequest.class));
+
+        Either<FailedOperation, Void> result =
+                bucketManager.createOrUpdateBucket(s3Client, kmsClient, bucketName, s3Specific, "accountId");
+
+        assertTrue(result.isLeft());
+        assertTrue(result.getLeft().message().contains("KMS encryption error"));
+    }
+
+    @Test
+    public void testCreateOrUpdateBucket_failure_enableAES256() {
+        when(s3Client.listBuckets()).thenReturn(mock(ListBucketsResponse.class));
+
+        when(s3Client.createBucket(any(CreateBucketRequest.class))).thenReturn(mock(CreateBucketResponse.class));
+        S3Waiter s3Waiter = mock(S3Waiter.class);
+        when(s3Client.waiter()).thenReturn(s3Waiter);
+        var waiterResponse = mock(WaiterResponse.class);
+        when(s3Waiter.waitUntilBucketExists(any(HeadBucketRequest.class), any(WaiterOverrideConfiguration.class)))
+                .thenReturn(waiterResponse);
+
+        ResponseOrException<HeadBucketResponse> responseOrException = mock(ResponseOrException.class);
+        when(waiterResponse.matched()).thenReturn(responseOrException);
+
+        Optional<HeadBucketResponse> response = Optional.of(mock(HeadBucketResponse.class));
+        when(responseOrException.response()).thenReturn(response);
+
+        doThrow(new RuntimeException("AES256 encryption error"))
+                .when(s3Client)
+                .putBucketEncryption(any(PutBucketEncryptionRequest.class));
+
+        Either<FailedOperation, Void> result =
+                bucketManager.createOrUpdateBucket(s3Client, kmsClient, bucketName, s3Specific, "accountId");
+
+        assertTrue(result.isLeft());
+        assertTrue(result.getLeft().message().contains("AES256 encryption error"));
+    }
+
+    @Test
+    public void testCreateOrUpdateBucket_failure_multipleVersioning() {
+
+        when(s3Client.listBuckets()).thenReturn(mock(ListBucketsResponse.class));
+
+        when(s3Client.createBucket(any(CreateBucketRequest.class))).thenReturn(mock(CreateBucketResponse.class));
+        S3Waiter s3Waiter = mock(S3Waiter.class);
+        when(s3Client.waiter()).thenReturn(s3Waiter);
+        var waiterResponse = mock(WaiterResponse.class);
+        when(s3Waiter.waitUntilBucketExists(any(HeadBucketRequest.class), any(WaiterOverrideConfiguration.class)))
+                .thenReturn(waiterResponse);
+
+        ResponseOrException<HeadBucketResponse> responseOrException = mock(ResponseOrException.class);
+        when(waiterResponse.matched()).thenReturn(responseOrException);
+
+        Optional<HeadBucketResponse> response = Optional.of(mock(HeadBucketResponse.class));
+        when(responseOrException.response()).thenReturn(response);
+
+        doThrow(new RuntimeException("Versioning error"))
+                .when(s3Client)
+                .putBucketVersioning(any(PutBucketVersioningRequest.class));
+
+        Either<FailedOperation, Void> result =
+                bucketManager.createOrUpdateBucket(s3Client, kmsClient, bucketName, s3Specific, "accountId");
+
+        assertTrue(result.isLeft());
+        assertTrue(result.getLeft().message().contains("Versioning error"));
+    }
+
+    @Test
+    public void testCreateOrUpdateBucket_failure_errorGeneratingKey() {
+        s3Specific.setBucketTags(null);
+        s3Specific.setServerSideEncryption(ServerSideEncryption.AWS_KMS);
+        when(s3Client.listBuckets()).thenReturn(mock(ListBucketsResponse.class));
+
+        when(s3Client.createBucket(any(CreateBucketRequest.class))).thenReturn(mock(CreateBucketResponse.class));
+        S3Waiter s3Waiter = mock(S3Waiter.class);
+        when(s3Client.waiter()).thenReturn(s3Waiter);
+        var waiterResponse = mock(WaiterResponse.class);
+        when(s3Waiter.waitUntilBucketExists(any(HeadBucketRequest.class), any(WaiterOverrideConfiguration.class)))
+                .thenReturn(waiterResponse);
+
+        CreateKeyResponse createKeyResponse = CreateKeyResponse.builder()
+                .keyMetadata(KeyMetadata.builder().keyId("testKeyId").build())
+                .build();
+
+        when(kmsClient.createKey(any(CreateKeyRequest.class)))
+                .thenThrow(new RuntimeException("runtime exception creating KMS key"));
+
+        ResponseOrException<HeadBucketResponse> responseOrException = mock(ResponseOrException.class);
+        when(waiterResponse.matched()).thenReturn(responseOrException);
+
+        Optional<HeadBucketResponse> response = Optional.of(mock(HeadBucketResponse.class));
+        when(responseOrException.response()).thenReturn(response);
+
+        Either<FailedOperation, Void> result =
+                bucketManager.createOrUpdateBucket(s3Client, kmsClient, bucketName, s3Specific, "accountId");
+
+        assertTrue(result.isLeft());
+        assertTrue(result.getLeft().message().contains("runtime exception creating KMS key"));
     }
 }

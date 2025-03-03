@@ -1,4 +1,4 @@
-package com.witboost.provisioning.s3.util;
+package com.witboost.provisioning.s3.utils;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;

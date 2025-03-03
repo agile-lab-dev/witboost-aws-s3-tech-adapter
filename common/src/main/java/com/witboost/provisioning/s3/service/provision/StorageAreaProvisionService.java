@@ -2,6 +2,7 @@ package com.witboost.provisioning.s3.service.provision;
 
 import com.witboost.provisioning.framework.service.ProvisionService;
 import com.witboost.provisioning.model.Specific;
+import com.witboost.provisioning.model.StorageArea;
 import com.witboost.provisioning.model.common.FailedOperation;
 import com.witboost.provisioning.model.common.Problem;
 import com.witboost.provisioning.model.request.ProvisionOperationRequest;
@@ -17,21 +18,32 @@ import java.util.Optional;
 import java.util.function.Function;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
 import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.kms.KmsClient;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.sts.StsClient;
 
-@Component
+@Service
 public class StorageAreaProvisionService implements ProvisionService {
 
     private final Logger logger = LoggerFactory.getLogger(StorageAreaProvisionService.class);
 
     private final Function<Region, S3Client> s3ClientProvider;
-    private final BucketManager bucketManager;
+    private final Function<Region, KmsClient> kmsClientProvider;
 
-    public StorageAreaProvisionService(Function<Region, S3Client> s3ClientProvider, BucketManager bucketManager) {
+    private final BucketManager bucketManager;
+    private final StsClient stsClient;
+
+    public StorageAreaProvisionService(
+            Function<Region, S3Client> s3ClientProvider,
+            Function<Region, KmsClient> kmsClientProvider,
+            StsClient stsClient,
+            BucketManager bucketManager) {
         this.s3ClientProvider = s3ClientProvider;
+        this.kmsClientProvider = kmsClientProvider;
         this.bucketManager = bucketManager;
+        this.stsClient = stsClient;
     }
 
     @Override
@@ -41,54 +53,71 @@ public class StorageAreaProvisionService implements ProvisionService {
         var component = getComponent(operationRequest);
         if (component.isLeft()) return Either.left(component.getLeft());
 
-        Either<FailedOperation, S3Specific> s3Specific = getS3Specific(component.get());
-        if (s3Specific.isLeft()) return Either.left(s3Specific.getLeft());
+        if (!(component.get() instanceof StorageArea<?> storageArea)) {
+            String error = String.format(
+                    "Invalid component type. %s is not a valid Storage Area",
+                    component.get().getName());
+            logger.error(error);
+            return Either.left(new FailedOperation(error, List.of(new Problem(error))));
+        } else {
 
-        Region region = Region.of(s3Specific.get().getRegion());
-        // Get the S3Client from the provider (cached or new)
-        S3Client s3Client = s3ClientProvider.apply(region);
+            Either<FailedOperation, S3Specific> s3SpecificEither = getS3Specific(component.get());
+            if (s3SpecificEither.isLeft()) return Either.left(s3SpecificEither.getLeft());
 
-        String bucketName = S3Utils.computeBucketName(operationRequest.getDataProduct(), component.get());
+            S3Specific s3Specific = s3SpecificEither.get();
+            Region region = Region.of(s3Specific.getRegion());
 
-        Either<FailedOperation, Void> bucketCreationResult = bucketManager.createBucket(
-                s3Client, bucketName, region.id(), s3Specific.get().getMultipleVersion());
+            // Get the S3Client from the provider (cached or new)
+            S3Client s3Client = s3ClientProvider.apply(region);
+            KmsClient kmsClient = kmsClientProvider.apply(region);
 
-        if (bucketCreationResult.isLeft()) return Either.left(bucketCreationResult.getLeft());
+            String bucketName = S3Utils.computeBucketName(operationRequest.getDataProduct());
 
-        String[] componentIdParts = component.get().getId().split(":");
-        String folderName = componentIdParts[componentIdParts.length - 1];
-        var location = new StringBuilder("s3://").append(bucketName).append("/").append(folderName);
+            Either<FailedOperation, Void> bucketCreationResult = bucketManager.createOrUpdateBucket(
+                    s3Client,
+                    kmsClient,
+                    bucketName,
+                    s3Specific,
+                    stsClient.getCallerIdentity().account());
 
-        Either<FailedOperation, Void> folderCreationResult =
-                bucketManager.createFolder(s3Client, bucketName, folderName);
+            if (bucketCreationResult.isLeft()) return Either.left(bucketCreationResult.getLeft());
 
-        if (folderCreationResult.isLeft()) return Either.left(folderCreationResult.getLeft());
+            String[] componentIdParts = component.get().getId().split(":");
+            String dpVersion = componentIdParts[componentIdParts.length - 2];
+            String folderPath = "v" + dpVersion;
+            String location = String.format("s3://%s/%s", bucketName, folderPath);
 
-        var info = Map.of(
-                "bucket",
-                Map.of(
-                        "type", "string",
-                        "label", "Bucket name",
-                        "value", bucketName),
-                "folder",
-                Map.of(
-                        "type", "string",
-                        "label", "Folder name",
-                        "value", folderName),
-                "location",
-                Map.of(
-                        "type", "string",
-                        "label", "Location",
-                        "value", location));
+            Either<FailedOperation, Void> folderCreationResult =
+                    bucketManager.createFolder(s3Client, bucketName, folderPath);
 
-        ProvisionInfo provisionInfo = ProvisionInfo.builder()
-                .privateInfo(Optional.of(info))
-                .publicInfo(Optional.of(info))
-                .build();
+            if (folderCreationResult.isLeft()) return Either.left(folderCreationResult.getLeft());
 
-        logger.info(String.format(
-                "Provisioning of %s completed successfully", component.get().getName()));
-        return Either.right(provisionInfo);
+            var info = Map.of(
+                    "bucket",
+                    Map.of(
+                            "type", "string",
+                            "label", "Bucket name",
+                            "value", bucketName),
+                    "folder",
+                    Map.of(
+                            "type", "string",
+                            "label", "Folder name",
+                            "value", folderPath),
+                    "location",
+                    Map.of(
+                            "type", "string",
+                            "label", "Location",
+                            "value", location));
+
+            ProvisionInfo provisionInfo = ProvisionInfo.builder()
+                    .privateInfo(Optional.of(info))
+                    .publicInfo(Optional.of(info))
+                    .build();
+
+            logger.info(String.format(
+                    "Provisioning of %s completed successfully", component.get().getName()));
+            return Either.right(provisionInfo);
+        }
     }
 
     @Override
@@ -98,28 +127,6 @@ public class StorageAreaProvisionService implements ProvisionService {
         var component = getComponent(operationRequest);
         if (component.isLeft()) return Either.left(component.getLeft());
 
-        Either<FailedOperation, S3Specific> s3Specific = getS3Specific(component.get());
-        if (s3Specific.isLeft()) return Either.left(s3Specific.getLeft());
-
-        Region region = Region.of(s3Specific.get().getRegion());
-
-        // Get the S3Client from the provider (cached or new)
-        S3Client s3Client = s3ClientProvider.apply(region);
-
-        String bucketName = S3Utils.computeBucketName(operationRequest.getDataProduct(), component.get());
-
-        Either<FailedOperation, Boolean> bucketExists = bucketManager.doesBucketExist(s3Client, bucketName);
-        if (bucketExists.isLeft()) return Either.left(bucketExists.getLeft());
-
-        String[] componentIdParts = component.get().getId().split(":");
-        String folderName = componentIdParts[componentIdParts.length - 1];
-
-        if (bucketExists.get()) {
-            var folderDeleted = bucketManager.deleteObjectsWithPrefix(s3Client, bucketName, folderName);
-
-            if (folderDeleted.isLeft()) return Either.left(folderDeleted.getLeft());
-        }
-
         var info = Map.of(
                 "result",
                 Map.of(
@@ -128,7 +135,9 @@ public class StorageAreaProvisionService implements ProvisionService {
                         "label",
                         "Operation result",
                         "value",
-                        String.format("Folder: %s successfully deleted. Bucket: %s", folderName, bucketName)));
+                        String.format(
+                                "Unprovisioning of %s completed successfully",
+                                component.get().getName())));
 
         ProvisionInfo provisionInfo = ProvisionInfo.builder()
                 .privateInfo(Optional.of(info))

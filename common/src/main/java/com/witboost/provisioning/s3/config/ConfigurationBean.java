@@ -12,19 +12,28 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.kms.KmsClient;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.sts.StsClient;
 
 @Configuration
 public class ConfigurationBean {
 
     private final Map<Region, S3Client> s3ClientCache = new ConcurrentHashMap<>();
 
+    private final Map<Region, KmsClient> kmsClientCache = new ConcurrentHashMap<>();
+
     @Autowired
-    private BucketManager bucketManager;
+    BucketManager bucketManager;
 
     @Bean
-    public StorageAreaProvisionService storageAreaProvisionService(BucketManager bucketManager) {
-        return new StorageAreaProvisionService(this::getS3Client, bucketManager);
+    public StsClient stsClient() {
+        return StsClient.create();
+    }
+
+    @Bean
+    public StorageAreaProvisionService storageAreaProvisionService(StsClient stsClient) {
+        return new StorageAreaProvisionService(this::getS3Client, this::getKmsClient, stsClient, bucketManager);
     }
 
     @Bean
@@ -40,8 +49,13 @@ public class ConfigurationBean {
                 region, r -> S3Client.builder().region(r).build());
     }
 
+    protected KmsClient getKmsClient(Region region) {
+        return kmsClientCache.computeIfAbsent(
+                region, r -> KmsClient.builder().region(r).build());
+    }
+
     @Bean
-    StorageAreaValidationService storageAreaValidationService() {
+    StorageAreaValidationService storageAreaValidationService(BucketManager bucketManager) {
         return new StorageAreaValidationService(this::getS3Client, bucketManager);
     }
 

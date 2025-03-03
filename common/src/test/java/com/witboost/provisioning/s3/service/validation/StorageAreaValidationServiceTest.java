@@ -115,7 +115,7 @@ class StorageAreaValidationServiceTest {
 
         assertTrue(result.isLeft());
         String error =
-                "[Bucket: null-dp-null-1526] Error: The bucket is located in a different region from eu-west-1. Current region of the bucket: eu-central-1.";
+                "[Bucket: null-dp-null4232f] Error: The bucket is located in a different region from eu-west-1. Current region of the bucket: eu-central-1.";
         FailedOperation expectedError = new FailedOperation(error, List.of(new Problem(error)));
 
         assertEquals(expectedError, result.getLeft());

@@ -52,3 +52,9 @@ labels: {}
 
 # -- This configuration allows you to override the application.yml file
 configOverride:
+
+# -- This configuration allows you to override the KMS policy
+kmsPolicyOverride:
+
+# -- This configuration allows you to override the bucket policy
+bucketPolicyOverride:

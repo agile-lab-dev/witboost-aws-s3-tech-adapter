@@ -1,31 +1,54 @@
 package com.witboost.provisioning.s3.utils;
 
-import com.witboost.provisioning.model.Component;
 import com.witboost.provisioning.model.DataProduct;
-import java.util.StringJoiner;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 public class S3Utils {
 
     /**
-     * Computes the bucket name from the descriptor
-     * @param dp is the data product descriptor
-     * @param cp is the component descriptor
-     * @return the name of the s3 bucket
+     * Computes a bucket name based on the domain, name, and environment of a DataProduct.
+     * The bucket name is truncated to 58 characters if it's too long, and a hash (SHA-256) is appended.
+     *
+     * @param dp The DataProduct object containing the domain, name, and environment.
+     * @return The computed bucket name, possibly truncated and appended with a hash.
      */
-    public static String computeBucketName(DataProduct dp, Component cp) {
+    public static String computeBucketName(DataProduct dp) {
 
-        String bucketNameWithoutHash = new StringJoiner("-")
-                .add(dp.getDomain())
-                .add(dp.getName())
-                .add(dp.getEnvironment())
-                .toString()
-                .replaceAll("\\s+", "")
-                .toLowerCase();
+        String bucketNameWithoutHash = dp.getDomain() + "-" + dp.getName() + "-" + dp.getEnvironment();
+        bucketNameWithoutHash = bucketNameWithoutHash.replaceAll("\\s+", "").toLowerCase();
 
-        int hash = bucketNameWithoutHash.hashCode();
-        if (bucketNameWithoutHash.length() > 58)
-            return bucketNameWithoutHash.substring(0, 58) + String.valueOf(hash).substring(0, 5);
+        String hash = sha256(bucketNameWithoutHash);
 
-        return bucketNameWithoutHash + String.valueOf(hash).substring(0, 5);
+        if (bucketNameWithoutHash.length() > 58) {
+            return bucketNameWithoutHash.substring(0, 58) + hash.substring(0, 5);
+        }
+
+        return bucketNameWithoutHash + hash.substring(0, 5);
+    }
+
+    /**
+     * Computes the SHA-256 hash of the input string and returns the first 5 characters of the hash.
+     *
+     * @param input The input string to hash.
+     * @return The first 5 characters of the SHA-256 hash.
+     */
+    protected static String sha256(String input) {
+        try {
+            // Create a MessageDigest instance for SHA-256
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hashBytes = digest.digest(input.getBytes());
+
+            // Convert the byte array into a hexadecimal string
+            StringBuilder hexString = new StringBuilder();
+            for (byte b : hashBytes) {
+                hexString.append(String.format("%02x", b)); // Format each byte as a 2-character hex string
+            }
+
+            // Return the full hexadecimal hash string
+            return hexString.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("SHA-256 algorithm not found", e);
+        }
     }
 }

@@ -32,7 +32,7 @@ To enable the above orchestration a TA exposes an API made up of five main opera
 The **S3 Tech Adapter** provides integration with Amazon S3 to manage data provisioning operations. It focuses on the creation and organization of S3 buckets and component folders for a given Data Product (DP).
 
 It offers:
-- **Bucket Management**: Create S3 buckets if they do not already exist.
+- **Bucket Management**: Create or update S3 buckets.
 - **Component Folder Management**: Organize Data Product components under structured folder hierarchies.
 
 ---
@@ -56,8 +56,7 @@ This flow enables the creation and management of S3 buckets and folders linked t
     - The **component folders** to be created within the bucket.
 
 #### - **Bucket Creation**
-- If the specified S3 bucket does not already exist, the **S3 Tech Adapter** creates it using the extracted metadata.
-- If the bucket already exists, no error occurs (idempotent operation).
+- The **S3 Tech Adapter** creates or updates the specified bucket using the extracted metadata.
 
 The following table describes the default values applied to S3 buckets during creation:
 
@@ -72,7 +71,7 @@ The following table describes the default values applied to S3 buckets during cr
 | Object Lock                  | Disabled                                                    |
 
 #### - **Component Folder Creation**
-- Within the S3 bucket, folders are created for the Data Product storages (e.g., `Component` folders).
+- Within the S3 bucket, folders are created for the Data Product's major versions.
 - Folder creation ensures that the Data Product's major version structure is organized efficiently.
 
 #### - **Operation Result Reporting**
@@ -105,18 +104,6 @@ This flow enables the removal of component folders within an S3 bucket without i
   - Identify the **S3 bucket name** in the format: `domain-dataproduct-environment-hash`.
   - Determine the **component folder** to be deleted.
 
-#### - **Component Folder Deletion**
-- The specified **component folder** within the S3 bucket is removed.
-- The deletion process is idempotent, meaning no errors occur if the folder has already been deleted or does not exist.
-
 #### - **Operation Result Reporting**
 - The final status of the operation is reported as the outcome of the unprovisioning process.
-- It includes:
-  - Success: Confirmation that the folder has been removed.
-  - Errors: Details of any issues encountered during the deletion process.
-
 ---
-
-### Requirements
-
-- **Technical User**: A technical user with `s3:DeleteObject` permissions is required to delete folders within the S3 bucket.

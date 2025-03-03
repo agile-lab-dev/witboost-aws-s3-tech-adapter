@@ -1,0 +1,18 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Sid": "RestrictToTLSRequestsOnly",
+    "Action": "s3:*",
+    "Effect": "Deny",
+    "Resource": [
+      "arn:aws:s3:::{bucketName}",
+      "arn:aws:s3:::{bucketName}/*"
+    ],
+    "Condition": {
+      "Bool": {
+        "aws:SecureTransport": "false"
+      }
+    },
+    "Principal": "*"
+  }]
+}

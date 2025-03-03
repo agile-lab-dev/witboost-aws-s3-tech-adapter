@@ -5,6 +5,7 @@ import static org.mockito.Mockito.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.witboost.provisioning.model.DataProduct;
+import com.witboost.provisioning.model.OutputPort;
 import com.witboost.provisioning.model.Specific;
 import com.witboost.provisioning.model.StorageArea;
 import com.witboost.provisioning.model.common.FailedOperation;
@@ -21,12 +22,18 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.*;
 import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.kms.KmsClient;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.sts.StsClient;
+import software.amazon.awssdk.services.sts.model.GetCallerIdentityResponse;
 
 class StorageAreaProvisionServiceTest {
 
     @Mock
     private Function<Region, S3Client> s3ClientProvider;
+
+    @Mock
+    private Function<Region, KmsClient> kmsClientProvider;
 
     @Mock
     private BucketManager bucketManager;
@@ -35,25 +42,40 @@ class StorageAreaProvisionServiceTest {
     private S3Client s3Client;
 
     @Mock
+    private KmsClient kmsClient;
+
+    @Mock
+    private StsClient stsClient;
+
+    @Mock
     private ProvisionOperationRequest<?, ? extends Specific> request;
 
-    @InjectMocks
     private StorageAreaProvisionService storageAreaProvisionService;
 
-    private String bucketName = "domain-dataproduct-dev-7559";
+    private String bucketName = "domain-dataproduct-dev2fd85";
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
+
+        when(s3ClientProvider.apply(any(Region.class))).thenReturn(s3Client);
+        when(kmsClientProvider.apply(any(Region.class))).thenReturn(kmsClient);
+
+        storageAreaProvisionService =
+                new StorageAreaProvisionService(s3ClientProvider, kmsClientProvider, stsClient, bucketManager);
+
+        GetCallerIdentityResponse callerIdentityResponse = mock(GetCallerIdentityResponse.class);
+        when(stsClient.getCallerIdentity()).thenReturn(callerIdentityResponse);
+        when(callerIdentityResponse.account()).thenReturn("accountId");
+
         when(request.getComponent()).thenReturn(Optional.of(createStorageArea()));
         when(request.getDataProduct()).thenReturn(createDataProduct());
     }
 
     @Test
     void testProvision_success() {
-
-        when(s3ClientProvider.apply(any(Region.class))).thenReturn(s3Client);
-        when(bucketManager.createBucket(eq(s3Client), eq(bucketName), anyString(), anyBoolean()))
+        when(bucketManager.createOrUpdateBucket(
+                        eq(s3Client), eq(kmsClient), eq(bucketName), any(S3Specific.class), anyString()))
                 .thenReturn(Either.right(null));
         when(bucketManager.createFolder(eq(s3Client), eq(bucketName), anyString()))
                 .thenReturn(Either.right(null));
@@ -61,7 +83,8 @@ class StorageAreaProvisionServiceTest {
         Either<FailedOperation, ProvisionInfo> result = storageAreaProvisionService.provision(request);
 
         assertTrue(result.isRight(), "Provision should succeed");
-        verify(bucketManager).createBucket(eq(s3Client), eq(bucketName), anyString(), anyBoolean());
+        verify(bucketManager)
+                .createOrUpdateBucket(eq(s3Client), eq(kmsClient), eq(bucketName), any(S3Specific.class), anyString());
         verify(bucketManager).createFolder(eq(s3Client), eq(bucketName), anyString());
     }
 
@@ -69,7 +92,8 @@ class StorageAreaProvisionServiceTest {
     void testProvision_success1() {
 
         when(s3ClientProvider.apply(any(Region.class))).thenReturn(s3Client);
-        when(bucketManager.createBucket(eq(s3Client), eq(bucketName), anyString(), anyBoolean()))
+        when(bucketManager.createOrUpdateBucket(
+                        eq(s3Client), eq(kmsClient), eq(bucketName), any(S3Specific.class), anyString()))
                 .thenReturn(Either.right(null));
         when(bucketManager.createFolder(eq(s3Client), eq(bucketName), anyString()))
                 .thenReturn(Either.right(null));
@@ -77,7 +101,8 @@ class StorageAreaProvisionServiceTest {
         Either<FailedOperation, ProvisionInfo> result = storageAreaProvisionService.provision(request);
 
         assertTrue(result.isRight(), "Provision should succeed");
-        verify(bucketManager).createBucket(eq(s3Client), eq(bucketName), anyString(), anyBoolean());
+        verify(bucketManager)
+                .createOrUpdateBucket(eq(s3Client), eq(kmsClient), eq(bucketName), any(S3Specific.class), anyString());
         verify(bucketManager).createFolder(eq(s3Client), eq(bucketName), anyString());
 
         var privateInfo =
@@ -98,9 +123,20 @@ class StorageAreaProvisionServiceTest {
         when(request.getComponent()).thenReturn(Optional.empty());
         Either<FailedOperation, ProvisionInfo> result = storageAreaProvisionService.provision(request);
 
-        assertTrue(result.isLeft(), "Unprovision should fail if component is empty");
+        assertTrue(result.isLeft(), "Provision should fail if component is empty");
         assertEquals(
                 "Invalid operation request: Component is missing. Request: request",
+                result.getLeft().message());
+    }
+
+    @Test
+    void testProvision_ComponentIsNotAStorageArea() {
+        when(request.getComponent()).thenReturn(Optional.of(new OutputPort<>()));
+        Either<FailedOperation, ProvisionInfo> result = storageAreaProvisionService.provision(request);
+
+        assertTrue(result.isLeft(), "Provision should fail if component is not a storage area");
+        assertEquals(
+                "Invalid component type. null is not a valid Storage Area",
                 result.getLeft().message());
     }
 
@@ -122,14 +158,16 @@ class StorageAreaProvisionServiceTest {
     void testProvision_bucketCreationFailure() {
 
         when(s3ClientProvider.apply(any(Region.class))).thenReturn(s3Client);
-        when(bucketManager.createBucket(eq(s3Client), eq(bucketName), anyString(), anyBoolean()))
+        when(bucketManager.createOrUpdateBucket(
+                        eq(s3Client), eq(kmsClient), eq(bucketName), any(S3Specific.class), anyString()))
                 .thenReturn(Either.left(new FailedOperation("Bucket creation failed", Collections.emptyList())));
 
         Either<FailedOperation, ProvisionInfo> result = storageAreaProvisionService.provision(request);
 
         assertTrue(result.isLeft(), "Provision should fail if bucket creation fails");
         assertEquals("Bucket creation failed", result.getLeft().message());
-        verify(bucketManager).createBucket(eq(s3Client), eq(bucketName), anyString(), anyBoolean());
+        verify(bucketManager)
+                .createOrUpdateBucket(eq(s3Client), eq(kmsClient), eq(bucketName), any(S3Specific.class), anyString());
         verify(bucketManager, never()).createFolder(any(), any(), any());
     }
 
@@ -137,7 +175,8 @@ class StorageAreaProvisionServiceTest {
     void testProvision_folderCreationFailure() {
 
         when(s3ClientProvider.apply(any(Region.class))).thenReturn(s3Client);
-        when(bucketManager.createBucket(eq(s3Client), eq(bucketName), anyString(), anyBoolean()))
+        when(bucketManager.createOrUpdateBucket(
+                        eq(s3Client), eq(kmsClient), eq(bucketName), any(S3Specific.class), anyString()))
                 .thenReturn(Either.right(null));
         when(bucketManager.createFolder(eq(s3Client), eq(bucketName), anyString()))
                 .thenReturn(Either.left(new FailedOperation("Folder creation failed", Collections.emptyList())));
@@ -146,7 +185,8 @@ class StorageAreaProvisionServiceTest {
 
         assertTrue(result.isLeft(), "Provision should fail if folder creation fails");
         assertEquals("Folder creation failed", result.getLeft().message());
-        verify(bucketManager).createBucket(eq(s3Client), eq(bucketName), anyString(), anyBoolean());
+        verify(bucketManager)
+                .createOrUpdateBucket(eq(s3Client), eq(kmsClient), eq(bucketName), any(S3Specific.class), anyString());
         verify(bucketManager).createFolder(any(), any(), any());
     }
 
@@ -160,7 +200,6 @@ class StorageAreaProvisionServiceTest {
         Either<FailedOperation, ProvisionInfo> result = storageAreaProvisionService.unprovision(request);
 
         assertTrue(result.isRight(), "Unprovision should succeed");
-        verify(bucketManager).deleteObjectsWithPrefix(eq(s3Client), eq(bucketName), anyString());
     }
 
     @Test
@@ -175,20 +214,6 @@ class StorageAreaProvisionServiceTest {
     }
 
     @Test
-    void testUnprovision_wrongSpecific() {
-
-        var component = createStorageArea();
-        component.setSpecific(new Specific());
-        when(request.getComponent()).thenReturn(Optional.of(component));
-        Either<FailedOperation, ProvisionInfo> result = storageAreaProvisionService.unprovision(request);
-
-        assertTrue(result.isLeft(), "Unprovision should fail if component specific is wrong");
-        assertEquals(
-                "Invalid Specific type of fake-storage. Expected S3Specific.",
-                result.getLeft().message());
-    }
-
-    @Test
     void testUnprovision_bucketDoesNotExist() {
         when(s3ClientProvider.apply(any(Region.class))).thenReturn(s3Client);
         when(bucketManager.doesBucketExist(eq(s3Client), eq(bucketName))).thenReturn(Either.right(false));
@@ -197,32 +222,6 @@ class StorageAreaProvisionServiceTest {
 
         assertTrue(result.isRight(), "Unprovision should succeed if bucket does not exist");
         verify(bucketManager, never()).deleteObjectsWithPrefix(any(), any(), any());
-    }
-
-    @Test
-    void testUnprovision_failureDeletingObjects() {
-        when(s3ClientProvider.apply(any(Region.class))).thenReturn(s3Client);
-        when(bucketManager.doesBucketExist(eq(s3Client), eq(bucketName))).thenReturn(Either.right(true));
-        when(bucketManager.deleteObjectsWithPrefix(eq(s3Client), eq(bucketName), anyString()))
-                .thenReturn(Either.left(new FailedOperation("Error deleting object", Collections.emptyList())));
-
-        Either<FailedOperation, ProvisionInfo> result = storageAreaProvisionService.unprovision(request);
-
-        assertTrue(result.isLeft(), "Unprovision should fail if object deletion fails");
-        assertEquals("Error deleting object", result.getLeft().message());
-    }
-
-    @Test
-    void testUnprovision_failureCheckingBucketExistence() {
-        when(s3ClientProvider.apply(any(Region.class))).thenReturn(s3Client);
-        when(bucketManager.doesBucketExist(eq(s3Client), eq(bucketName)))
-                .thenReturn(
-                        Either.left(new FailedOperation("Error checking bucket existence", Collections.emptyList())));
-
-        Either<FailedOperation, ProvisionInfo> result = storageAreaProvisionService.unprovision(request);
-
-        assertTrue(result.isLeft(), "Unprovision should fail if bucket existence check fails");
-        assertEquals("Error checking bucket existence", result.getLeft().message());
     }
 
     private S3Specific createS3Specific() {

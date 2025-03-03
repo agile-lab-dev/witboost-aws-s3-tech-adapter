@@ -2,10 +2,18 @@ package com.witboost.provisioning.s3.client;
 
 import com.witboost.provisioning.model.common.FailedOperation;
 import com.witboost.provisioning.model.common.Problem;
+import com.witboost.provisioning.s3.model.BucketTag;
+import com.witboost.provisioning.s3.model.LifeCycleConfiguration;
+import com.witboost.provisioning.s3.model.S3Specific;
 import io.vavr.control.Either;
 import jakarta.validation.constraints.NotBlank;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 import lombok.NoArgsConstructor;
 import org.jetbrains.annotations.NotNull;
@@ -16,6 +24,7 @@ import org.springframework.stereotype.Service;
 import software.amazon.awssdk.awscore.exception.AwsServiceException;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.core.waiters.WaiterOverrideConfiguration;
+import software.amazon.awssdk.services.kms.KmsClient;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
 import software.amazon.awssdk.services.s3.waiters.S3Waiter;
@@ -36,66 +45,383 @@ public class BucketManager {
     private int objectWaitTimeoutSeconds;
 
     /**
-     * Creates an S3 bucket if it does not already exist.
-     * If the bucket already exists in a different region, an error is returned.
-     * This operation waits until the bucket is confirmed to exist.
+     * Creates an S3 bucket if it does not already exist. If the bucket exists in a different region, an error is returned.
+     * Additionally, this method can update the bucket's configuration by applying tags, encryption settings, and versioning.
      *
-     * @param s3Client   the {@link S3Client} used to interact with Amazon S3.
-     * @param bucketName the name of the bucket to create.
-     * @param region     the desired region for the bucket.
-     * @return an {@link Either} containing {@link FailedOperation} in case of error or {@code null} on success.
+     * @param s3Client       the {@link S3Client} used to interact with Amazon S3.
+     * @param kmsClient the {@link KmsClient} used for AWS KMS encryption.
+     * @param bucketName     the name of the bucket to create.
+     * @param s3Specific     S3-specific configurations.
+     * @param accountId      the AWS account ID. This is used when configuring encryption or permissions for the bucket.
+     *
+     * @return an {@link Either} containing:
+     *         - {@link FailedOperation} in case of error, detailing the failure reason.
+     *         - {@code null} on success, indicating that the bucket was successfully created or updated.
+     *
      */
-    public Either<FailedOperation, Void> createBucket(
-            @NotNull S3Client s3Client, @NotNull String bucketName, @NotNull String region, Boolean multipleVersion) {
+    public Either<FailedOperation, Void> createOrUpdateBucket(
+            @NotNull S3Client s3Client,
+            @NotNull KmsClient kmsClient,
+            @NotNull String bucketName,
+            S3Specific s3Specific,
+            String accountId) {
         try {
-            logger.info("Starting creation of bucket '{}' in region '{}'.", bucketName, region);
+            String region = s3Specific.getRegion();
 
             Either<FailedOperation, Boolean> bucketExists = doesBucketExist(s3Client, bucketName);
             if (bucketExists.isLeft()) return Either.left(bucketExists.getLeft());
 
-            // Bucket already exists
-            if (bucketExists.get()) {
+            if (!bucketExists.get()) {
+                logger.info("Starting creation of bucket '{}' in region '{}'.", bucketName, region);
+
+                CreateBucketRequest createRequest =
+                        CreateBucketRequest.builder().bucket(bucketName).build();
+
+                s3Client.createBucket(createRequest);
+                Either<FailedOperation, Void> waitForBucketExistence = waitForBucketExistence(s3Client, bucketName);
+                if (waitForBucketExistence.isLeft()) return Either.left(waitForBucketExistence.getLeft());
+
+                logger.info("Bucket '{}' created in region '{}'.", bucketName, region);
+
+            } else {
                 Either<FailedOperation, String> existingRegion = getBucketRegion(s3Client, bucketName);
                 if (existingRegion.isLeft()) return Either.left(existingRegion.getLeft());
 
-                if (region.equals(existingRegion.get())) {
-                    logger.info("Bucket '{}' already exists in region '{}'.", bucketName, region);
-                    return Either.right(null);
+                if (!region.equals(existingRegion.get())) {
+                    String error = String.format(
+                            "[Bucket: %s] Error: The bucket already exists in region %s and cannot be created or updated in region %s.",
+                            bucketName, existingRegion.get(), region);
+                    logger.error(error);
+                    return Either.left(new FailedOperation(error, List.of(new Problem(error))));
                 }
-
-                String error = String.format(
-                        "[Bucket: %s] Error: The bucket already exists in a different region (%s). Cannot create a new one in %s",
-                        bucketName, existingRegion.get(), region);
-                logger.error(error);
-                return Either.left(new FailedOperation(error, List.of(new Problem(error))));
             }
 
-            // Create the bucket
-            CreateBucketRequest createRequest =
-                    CreateBucketRequest.builder().bucket(bucketName).build();
-            s3Client.createBucket(createRequest);
+            logger.info("Starting the update of the bucket configurations of '{}'.", bucketName);
 
-            // Wait until the bucket exists
-            Either<FailedOperation, Void> waitForBucketExistence = waitForBucketExistence(s3Client, bucketName);
-            if (waitForBucketExistence.isLeft()) return Either.left(waitForBucketExistence.getLeft());
+            List<BucketTag> tags = s3Specific.getBucketTags();
+            var bucketTagging = applyBucketTags(s3Client, bucketName, tags);
+            if (bucketTagging.isLeft()) return Either.left(bucketTagging.getLeft());
 
-            if (multipleVersion) {
-                VersioningConfiguration versioningConfiguration = VersioningConfiguration.builder()
-                        .status(BucketVersioningStatus.ENABLED)
-                        .build();
-                PutBucketVersioningRequest putBucketVersioningRequest = PutBucketVersioningRequest.builder()
-                        .bucket(bucketName)
-                        .versioningConfiguration(versioningConfiguration)
-                        .build();
-                s3Client.putBucketVersioning(putBucketVersioningRequest);
+            var bucketPolicySecureTransport = applyBucketPolicyForSecureTransport(s3Client, bucketName);
+            if (bucketPolicySecureTransport.isLeft()) return Either.left(bucketPolicySecureTransport.getLeft());
+
+            if (s3Specific.getServerSideEncryption().equals(ServerSideEncryption.AWS_KMS)) {
+                var enableKMS = enableKMS(s3Client, kmsClient, bucketName, s3Specific, accountId);
+                if (enableKMS.isLeft()) return Either.left(enableKMS.getLeft());
+            } else { // default encryption
+                var enableAES256 = enableAES256(s3Client, bucketName);
+                if (enableAES256.isLeft()) return Either.left(enableAES256.getLeft());
             }
 
-            logger.info("Bucket '{}' is successfully created in region '{}'.", bucketName, region);
+            if (s3Specific.getMultipleVersion()) {
+                var multipleVersioning =
+                        enableBucketVersioning(s3Client, bucketName, s3Specific.getLifeCycleConfiguration());
+                if (multipleVersioning.isLeft()) return Either.left(multipleVersioning.getLeft());
+            }
+
+            logger.info("Bucket '{}' is successfully created or updated in region '{}'.", bucketName, region);
             return Either.right(null);
 
         } catch (Exception e) {
             String error = String.format(
                     "[Bucket: %s] Error: An unexpected error occurred while creating the bucket. Details: %s",
+                    bucketName, e.getMessage());
+            logger.error(error, e);
+            return Either.left(new FailedOperation(error, List.of(new Problem(error, e))));
+        }
+    }
+
+    /**
+     * Enables AES256 encryption for the specified S3 bucket.
+     *
+     * @param s3Client   the {@link S3Client} used to perform the operation.
+     * @param bucketName the name of the bucket.
+     *
+     * @return an {@link Either} containing:
+     *         - {@code null} if AES256 encryption is successfully applied.
+     *         - {@link FailedOperation} if an error occurs while applying encryption settings.
+     */
+    protected Either<FailedOperation, Void> enableAES256(@NotNull S3Client s3Client, @NotNull String bucketName) {
+        try {
+            logger.info("Enabling AES256 encryption for bucket: '{}'.", bucketName);
+
+            s3Client.putBucketEncryption(PutBucketEncryptionRequest.builder()
+                    .bucket(bucketName)
+                    .serverSideEncryptionConfiguration(ServerSideEncryptionConfiguration.builder()
+                            .rules(ServerSideEncryptionRule.builder()
+                                    .applyServerSideEncryptionByDefault(ServerSideEncryptionByDefault.builder()
+                                            .sseAlgorithm(ServerSideEncryption.AES256)
+                                            .build())
+                                    .build())
+                            .build())
+                    .build());
+            logger.info("AES256 encryption enabled for bucket: '{}'.", bucketName);
+            return Either.right(null);
+
+        } catch (Exception e) {
+            String error = String.format(
+                    "[Bucket: %s] Error: An unexpected error occurred while enabling AES256 encryption. Details: %s",
+                    bucketName, e.getMessage());
+            logger.error(error, e);
+            return Either.left(new FailedOperation(error, List.of(new Problem(error, e))));
+        }
+    }
+
+    /**
+     * Enables AWS KMS encryption for the specified S3 bucket.
+     * If KMS encryption is already enabled, no changes are applied.
+     *
+     * @param s3Client       the {@link S3Client} used to perform the operation.
+     * @param kmsClient the {@link KmsClient} used for key management.
+     * @param bucketName     the name of the bucket.
+     * @param s3Specific     S3-specific configurations.
+     * @param accountId      the AWS account ID, required for KMS key creation.
+     *
+     * @return an {@link Either} containing:
+     *         - {@code null} if KMS encryption is successfully enabled or already active.
+     *         - {@link FailedOperation} if an error occurs while retrieving encryption settings or applying KMS.
+     */
+    protected Either<FailedOperation, Void> enableKMS(
+            @NotNull S3Client s3Client,
+            @NotNull KmsClient kmsClient,
+            @NotNull String bucketName,
+            @NotNull S3Specific s3Specific,
+            String accountId) {
+
+        try {
+            logger.info(
+                    "Request to enable KMS encryption. Checking current encryption settings for bucket: '{}'.",
+                    bucketName);
+
+            GetBucketEncryptionResponse currentEncryption = s3Client.getBucketEncryption(
+                    GetBucketEncryptionRequest.builder().bucket(bucketName).build());
+
+            if (isKmsEnabled(currentEncryption)) {
+                logger.info("KMS encryption is already enabled for bucket: '{}'.", bucketName);
+                return Either.right(null);
+            }
+
+            logger.info("KMS encryption not enabled. Enabling KMS encryption for bucket: '{}'.", bucketName);
+
+            Either<FailedOperation, String> createKey = new KmsManager()
+                    .createKey(
+                            kmsClient,
+                            accountId,
+                            String.format("Witboost-generated KMS key for bucket '%s'", bucketName),
+                            s3Specific.getBucketTags());
+            if (createKey.isLeft()) return Either.left(createKey.getLeft());
+
+            String keyId = createKey.get();
+
+            s3Client.putBucketEncryption(PutBucketEncryptionRequest.builder()
+                    .bucket(bucketName)
+                    .serverSideEncryptionConfiguration(ServerSideEncryptionConfiguration.builder()
+                            .rules(ServerSideEncryptionRule.builder()
+                                    .applyServerSideEncryptionByDefault(ServerSideEncryptionByDefault.builder()
+                                            .sseAlgorithm(ServerSideEncryption.AWS_KMS)
+                                            .kmsMasterKeyID(keyId)
+                                            .build())
+                                    .build())
+                            .build())
+                    .build());
+            logger.info("KMS encryption enabled with key ID '{}' for bucket: '{}'.", keyId, bucketName);
+            return Either.right(null);
+
+        } catch (Exception e) {
+            String error = String.format(
+                    "[Bucket: %s] Error: An unexpected error occurred while enabling KMS encryption. Details: %s",
+                    bucketName, e.getMessage());
+            logger.error(error, e);
+            return Either.left(new FailedOperation(error, List.of(new Problem(error, e))));
+        }
+    }
+
+    protected boolean isKmsEnabled(GetBucketEncryptionResponse response) {
+        if (response == null || response.serverSideEncryptionConfiguration() == null) {
+            return false;
+        }
+
+        ServerSideEncryptionConfiguration config = response.serverSideEncryptionConfiguration();
+
+        for (ServerSideEncryptionRule rule : config.rules()) {
+            ServerSideEncryptionByDefault encryptionByDefault = rule.applyServerSideEncryptionByDefault();
+            if (encryptionByDefault != null && "aws:kms".equals(encryptionByDefault.sseAlgorithmAsString())) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Enables versioning for the specified bucket and applies lifecycle configuration.
+     *
+     * @param s3Client             the {@link S3Client} used to perform the operation.
+     * @param bucketName           the name of the bucket.
+     * @param lifeCycleConfiguration the lifecycle configuration to apply.
+     *
+     * @return an {@link Either} containing:
+     *         - {@code null} if versioning is successfully enabled.
+     *         - {@link FailedOperation} if an error occurs while enabling versioning.
+     */
+    protected Either<FailedOperation, Void> enableBucketVersioning(
+            @NotNull S3Client s3Client, @NotNull String bucketName, LifeCycleConfiguration lifeCycleConfiguration) {
+
+        try {
+            logger.info("Enabling versioning for bucket: '{}'.", bucketName);
+
+            VersioningConfiguration versioningConfiguration = VersioningConfiguration.builder()
+                    .status(BucketVersioningStatus.ENABLED)
+                    .build();
+            PutBucketVersioningRequest putBucketVersioningRequest = PutBucketVersioningRequest.builder()
+                    .bucket(bucketName)
+                    .versioningConfiguration(versioningConfiguration)
+                    .build();
+            s3Client.putBucketVersioning(putBucketVersioningRequest);
+
+            logger.info("Versioning enabled for bucket: '{}'.", bucketName);
+
+        } catch (Exception e) {
+            String error = String.format(
+                    "[Bucket: %s] Error: An unexpected error occurred while enabling versioning. Details: %s",
+                    bucketName, e.getMessage());
+            logger.error(error, e);
+            return Either.left(new FailedOperation(error, List.of(new Problem(error, e))));
+        }
+
+        if (lifeCycleConfiguration.getPermanentlyDelete() != null)
+            return applyLifeCycleConfiguration(s3Client, bucketName, lifeCycleConfiguration);
+        return Either.right(null);
+    }
+
+    protected Either<FailedOperation, Void> applyLifeCycleConfiguration(
+            @NotNull S3Client s3Client, @NotNull String bucketName, LifeCycleConfiguration lifeCycleConfiguration) {
+        try {
+            logger.info("Applying lifecycle configuration for bucket: '{}'.", bucketName);
+
+            BucketLifecycleConfiguration bucketLifecycleConfiguration = BucketLifecycleConfiguration.builder()
+                    .rules(LifecycleRule.builder()
+                            .id("witboostLifeCycleConfiguration")
+                            .status(ExpirationStatus.ENABLED)
+                            .filter(LifecycleRuleFilter.builder().build())
+                            .noncurrentVersionExpiration(NoncurrentVersionExpiration.builder()
+                                    .noncurrentDays(lifeCycleConfiguration
+                                            .getPermanentlyDelete()
+                                            .getDaysAfterBecomeNonCurrent())
+                                    .newerNoncurrentVersions(lifeCycleConfiguration
+                                            .getPermanentlyDelete()
+                                            .getNumberOfVersionsToRetain())
+                                    .build())
+                            .build())
+                    .build();
+
+            s3Client.putBucketLifecycleConfiguration(PutBucketLifecycleConfigurationRequest.builder()
+                    .bucket(bucketName)
+                    .transitionDefaultMinimumObjectSize(TransitionDefaultMinimumObjectSize.ALL_STORAGE_CLASSES_128_K)
+                    .lifecycleConfiguration(bucketLifecycleConfiguration)
+                    .build());
+
+            return Either.right(null);
+
+        } catch (Exception e) {
+            String error = String.format(
+                    "[Bucket: %s] Error: An unexpected error occurred while applying lifecycle configuration. Details: %s",
+                    bucketName, e.getMessage());
+            logger.error(error, e);
+            return Either.left(new FailedOperation(error, List.of(new Problem(error, e))));
+        }
+    }
+
+    /**
+     * Applies a bucket policy enforcing secure transport (HTTPS-only access).
+     * The policy should be contained in a json file.
+     *
+     * @param s3Client   the {@link S3Client} used to perform the operation.
+     * @param bucketName the name of the bucket.
+     *
+     * @return an {@link Either} containing:
+     *         - {@code null} if the policy is successfully applied.
+     *         - {@link FailedOperation} if an error occurs while reading the policy file or applying the policy.
+     */
+    protected Either<FailedOperation, Void> applyBucketPolicyForSecureTransport(
+            @NotNull S3Client s3Client, @NotNull String bucketName) {
+
+        try {
+            logger.info("Applying secure transport policy for bucket: '{}'.", bucketName);
+
+            String bucketPolicy;
+
+            if (System.getProperty("bucket.policy.path") != null) {
+                String policyPath = System.getProperty("bucket.policy.path");
+                logger.info("Using custom bucket policy path: {}", policyPath);
+                bucketPolicy = new String(Files.readAllBytes(Paths.get(policyPath)));
+
+            } else {
+                InputStream inputStream = getClass().getClassLoader().getResourceAsStream("bucket-policy.json");
+                logger.info("Using default bucket policy path");
+                bucketPolicy = new String(Objects.requireNonNull(inputStream).readAllBytes(), StandardCharsets.UTF_8);
+            }
+
+            logger.debug("Original bucket policy: {}", bucketPolicy);
+            String updatedPolicy = bucketPolicy.replace("{bucketName}", bucketName);
+            logger.debug("Updated bucket policy: {}", updatedPolicy);
+
+            PutBucketPolicyRequest putBucketPolicyRequest = PutBucketPolicyRequest.builder()
+                    .bucket(bucketName)
+                    .policy(updatedPolicy)
+                    .build();
+
+            s3Client.putBucketPolicy(putBucketPolicyRequest);
+
+            logger.info("Secure transport policy applied for bucket: '{}'.", bucketName);
+            return Either.right(null);
+
+        } catch (Exception e) {
+            String error = String.format(
+                    "[Bucket: %s] Error: An unexpected error occurred while applying secure transport policy. Details: %s",
+                    bucketName, e.getMessage());
+            logger.error(error, e);
+            return Either.left(new FailedOperation(error, List.of(new Problem(error, e))));
+        }
+    }
+
+    /**
+     * Applies tags to the specified S3 bucket.
+     * If no tags are provided, the method returns successfully without applying any changes.
+     *
+     * @param s3Client   the {@link S3Client} used to perform the operation.
+     * @param bucketName the name of the bucket.
+     * @param tags       the list of tags to apply.
+     *
+     * @return an {@link Either} containing:
+     *         - {@code null} if tags are successfully applied or no tags were provided.
+     *         - {@link FailedOperation} if an error occurs while applying the tags.
+     */
+    protected Either<FailedOperation, Void> applyBucketTags(
+            @NotNull S3Client s3Client, @NotNull String bucketName, List<BucketTag> tags) {
+        List<software.amazon.awssdk.services.s3.model.Tag> awsTags = new ArrayList<>();
+        try {
+            if (tags == null || tags.isEmpty()) {
+                logger.info("No tags provided for bucket: '{}'. Skipping tag application.", bucketName);
+                return Either.right(null);
+            }
+            logger.info("Applying tags to bucket: '{}'.", bucketName);
+
+            tags.forEach(tag -> awsTags.add(software.amazon.awssdk.services.s3.model.Tag.builder()
+                    .key(tag.getKey())
+                    .value(tag.getValue())
+                    .build()));
+
+            s3Client.putBucketTagging(PutBucketTaggingRequest.builder()
+                    .bucket(bucketName)
+                    .tagging(Tagging.builder().tagSet(awsTags).build())
+                    .build());
+
+            logger.info("Tags successfully applied to bucket: '{}'.", bucketName);
+            return Either.right(null);
+        } catch (Exception e) {
+            String error = String.format(
+                    "[Bucket: %s] Error: An unexpected error occurred while applying tags to the bucket. Details: %s",
                     bucketName, e.getMessage());
             logger.error(error, e);
             return Either.left(new FailedOperation(error, List.of(new Problem(error, e))));

@@ -31,6 +31,13 @@ spec:
         - name: {{ .Chart.Name }}
           image: {{ .Values.image.registry }}:{{ .Values.image.tag }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+          {{- if .Values.kmsPolicyOverride }}
+            - "-Dkms.policy.path=/opt/docker/etc/configs/kmsPolicy.json"
+          {{- end }}
+          {{- if .Values.bucketPolicyOverride }}
+            - "-Dbucket.policy.path=/opt/docker/etc/configs/bucketPolicy.json"
+          {{- end }}
           ports:
             - name: http
               containerPort: 8888

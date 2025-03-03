@@ -59,7 +59,7 @@ public class StorageAreaValidationService implements ComponentValidationService 
         Region region = Region.of(((S3Specific) componentSpecific).getRegion());
         S3Client s3Client = s3ClientProvider.apply(region);
 
-        String bucketName = S3Utils.computeBucketName(operationRequest.getDataProduct(), component.get());
+        String bucketName = S3Utils.computeBucketName(operationRequest.getDataProduct());
 
         Either<FailedOperation, Boolean> bucketExists = bucketManager.doesBucketExist(s3Client, bucketName);
         if (bucketExists.isLeft()) return Either.left(bucketExists.getLeft());

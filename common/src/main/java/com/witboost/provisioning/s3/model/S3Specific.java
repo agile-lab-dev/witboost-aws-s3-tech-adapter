@@ -1,30 +1,31 @@
 package com.witboost.provisioning.s3.model;
 
 import com.witboost.provisioning.model.Specific;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import java.util.List;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
+import software.amazon.awssdk.services.s3.model.ServerSideEncryption;
 
 @NoArgsConstructor
+@Getter
+@Setter
 public class S3Specific extends Specific {
 
     @NotBlank
     private String region;
 
+    private ServerSideEncryption serverSideEncryption;
+
     private Boolean multipleVersion;
 
-    public String getRegion() {
-        return region;
-    }
+    @Valid
+    private LifeCycleConfiguration lifeCycleConfiguration;
 
-    public Boolean getMultipleVersion() {
-        return multipleVersion;
-    }
+    @Valid
+    private IntelligentTieringConfiguration intelligentTieringConfiguration;
 
-    public void setMultipleVersion(Boolean multipleVersion) {
-        this.multipleVersion = multipleVersion;
-    }
-
-    public void setRegion(String region) {
-        this.region = region;
-    }
+    private List<@Valid BucketTag> bucketTags;
 }

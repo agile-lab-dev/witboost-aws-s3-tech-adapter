@@ -13,7 +13,9 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.kms.KmsClient;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.sts.StsClient;
 
 class ConfigurationBeanTest {
 
@@ -23,6 +25,9 @@ class ConfigurationBeanTest {
     @Mock
     private BucketManager bucketManager;
 
+    @Mock
+    private StsClient stsClient;
+
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
@@ -30,13 +35,13 @@ class ConfigurationBeanTest {
 
     @Test
     void testStorageAreaProvisionServiceBean() {
-        StorageAreaProvisionService service = configurationBean.storageAreaProvisionService(bucketManager);
+        StorageAreaProvisionService service = configurationBean.storageAreaProvisionService(stsClient);
         assertNotNull(service, "StorageAreaProvisionService bean should not be null");
     }
 
     @Test
     void testProvisionConfigurationBean() {
-        StorageAreaProvisionService service = configurationBean.storageAreaProvisionService(bucketManager);
+        StorageAreaProvisionService service = configurationBean.storageAreaProvisionService(stsClient);
 
         ProvisionConfiguration configuration = configurationBean.provisionConfiguration(service);
 
@@ -49,12 +54,12 @@ class ConfigurationBeanTest {
 
     @Test
     void testStorageAreaValidationServiceBean() {
-        StorageAreaValidationService service = configurationBean.storageAreaValidationService();
+        StorageAreaValidationService service = configurationBean.storageAreaValidationService(bucketManager);
     }
 
     @Test
     void testValidationConfigurationBean() {
-        StorageAreaValidationService service = configurationBean.storageAreaValidationService();
+        StorageAreaValidationService service = configurationBean.storageAreaValidationService(bucketManager);
         ValidationConfiguration validationConfigurationBean = new ConfigurationBean().validationConfiguration(service);
 
         assertEquals(service, validationConfigurationBean.getStorageValidationService());
@@ -70,5 +75,16 @@ class ConfigurationBeanTest {
         // Assert that the S3 client is cached
         assertNotNull(s3Client1, "S3Client should not be null");
         assertSame(s3Client1, s3Client2, "S3Client should be cached and return the same instance");
+    }
+
+    @Test
+    void testGetKmsClientCaching() {
+        Region region = Region.US_WEST_2;
+        KmsClient kmsClient1 = configurationBean.getKmsClient(region);
+        KmsClient kmsClient2 = configurationBean.getKmsClient(region);
+
+        // Assert that the KMS client is cached
+        assertNotNull(kmsClient1, "KmsClient should not be null");
+        assertSame(kmsClient1, kmsClient2, "KmsClient should be cached and return the same instance");
     }
 }

@@ -20,12 +20,14 @@ A Helm chart for Kubernetes
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
+| bucketPolicyOverride | string | `nil` | This configuration allows you to override the bucket policy |
 | configOverride | string | `nil` | This configuration allows you to override the application.yml file |
 | dockerRegistrySecretName | string | `"regcred"` | Docker Registry Secret name used to access a private repo |
 | extraEnvVars | list | `[]` | define extra variables to add to the container(s) e.g: extraEnvVars:   - name: FOO     value: "10" |
 | image.pullPolicy | string | `"Always"` | The imagePullPolicy for a container and the tag of the image affect when the kubelet attempts to pull (download) the specified image. |
 | image.registry | string | `"registry.gitlab.com/agilefactory/witboost.mesh/provisioning/aws/witboost.mesh.provisioning.s3"` | Image repository |
 | image.tag | string | `"to-be-replaced"` | Image tag |
+| kmsPolicyOverride | string | `nil` | This configuration allows you to override the KMS policy |
 | labels | object | `{}` | Allows you to specify common labels |
 | livenessProbe | object | `{}` | liveness probe spec |
 | otel | object | `{"collectorUrl":"http://localhost:5555","enabled":"false","metricExporter":"otlp","serviceName":"s3-tech-adapter","tracesExporter":"otlp"}` | otel configuration |
