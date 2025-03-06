@@ -3,6 +3,7 @@ package com.witboost.provisioning.s3.utils;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+import com.witboost.provisioning.model.Component;
 import com.witboost.provisioning.model.DataProduct;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -10,10 +11,12 @@ import org.junit.jupiter.api.Test;
 class S3UtilsTest {
 
     private DataProduct<?> dataProduct;
+    private Component<?> component;
 
     @BeforeEach
     void setUp() {
         dataProduct = mock(DataProduct.class);
+        component = mock(Component.class);
     }
 
     @Test
@@ -21,10 +24,11 @@ class S3UtilsTest {
         when(dataProduct.getDomain()).thenReturn("finance");
         when(dataProduct.getName()).thenReturn("reporting");
         when(dataProduct.getEnvironment()).thenReturn("prod");
+        when(component.getId()).thenReturn("urn:dmb:cmp:finance:reporting:0:raw-storage-area");
 
-        String bucketName = S3Utils.computeBucketName(dataProduct);
+        String bucketName = S3Utils.computeBucketName(dataProduct, component);
 
-        assertTrue(bucketName.startsWith("finance-reporting-prod"));
+        assertTrue(bucketName.startsWith("finance-reporting-raw-storage-area-prod"));
     }
 
     @Test
@@ -32,10 +36,11 @@ class S3UtilsTest {
         when(dataProduct.getDomain()).thenReturn("  Sales ");
         when(dataProduct.getName()).thenReturn("Analytics ");
         when(dataProduct.getEnvironment()).thenReturn(" Dev ");
+        when(component.getId()).thenReturn("urn:dmb:cmp:finance:reporting:0:raw-storage-area");
 
-        String bucketName = S3Utils.computeBucketName(dataProduct);
+        String bucketName = S3Utils.computeBucketName(dataProduct, component);
 
-        assertTrue(bucketName.startsWith("sales-analytics-dev"));
+        assert (bucketName.startsWith("sales-analytics-raw-storage-area-dev"));
     }
 
     @Test
@@ -43,8 +48,9 @@ class S3UtilsTest {
         when(dataProduct.getDomain()).thenReturn("verylongdomainnameexceedinglimits");
         when(dataProduct.getName()).thenReturn("verylongdatanameexceedinglimits");
         when(dataProduct.getEnvironment()).thenReturn("prod");
+        when(component.getId()).thenReturn("urn:dmb:cmp:finance:reporting:0:raw-storage-area");
 
-        String bucketName = S3Utils.computeBucketName(dataProduct);
+        String bucketName = S3Utils.computeBucketName(dataProduct, component);
 
         assertEquals(63, bucketName.length());
     }

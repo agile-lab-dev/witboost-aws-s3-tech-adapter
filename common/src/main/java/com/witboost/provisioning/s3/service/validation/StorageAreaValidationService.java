@@ -38,20 +38,19 @@ public class StorageAreaValidationService implements ComponentValidationService 
     public Either<FailedOperation, Void> validate(
             @Valid OperationRequest<?, ? extends Specific> operationRequest, OperationType operationType) {
 
-        var component = operationRequest.getComponent();
-        if (component.isEmpty()) {
+        var cmp = operationRequest.getComponent();
+        if (cmp.isEmpty()) {
             String error =
                     String.format("Invalid operation request: Component is missing. Request: %s", operationRequest);
             logger.error(error);
             return Either.left(new FailedOperation(error, List.of(new Problem(error))));
         }
 
-        var componentSpecific = component.get().getSpecific();
+        var component = cmp.get();
+        var componentSpecific = component.getSpecific();
 
         if (!(componentSpecific instanceof @Valid S3Specific)) {
-            String error = String.format(
-                    "Invalid Specific type of %s. Expected S3Specific.",
-                    component.get().getName());
+            String error = String.format("Invalid Specific type of %s. Expected S3Specific.", component.getName());
             logger.error(error);
             return Either.left(new FailedOperation(error, List.of(new Problem(error))));
         }
@@ -59,7 +58,7 @@ public class StorageAreaValidationService implements ComponentValidationService 
         Region region = Region.of(((S3Specific) componentSpecific).getRegion());
         S3Client s3Client = s3ClientProvider.apply(region);
 
-        String bucketName = S3Utils.computeBucketName(operationRequest.getDataProduct());
+        String bucketName = S3Utils.computeBucketName(operationRequest.getDataProduct(), component);
 
         Either<FailedOperation, Boolean> bucketExists = bucketManager.doesBucketExist(s3Client, bucketName);
         if (bucketExists.isLeft()) return Either.left(bucketExists.getLeft());

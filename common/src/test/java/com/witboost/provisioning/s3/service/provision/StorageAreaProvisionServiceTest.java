@@ -52,7 +52,7 @@ class StorageAreaProvisionServiceTest {
 
     private StorageAreaProvisionService storageAreaProvisionService;
 
-    private String bucketName = "domain-dataproduct-dev2fd85";
+    private String bucketName = "domain-dataproduct-componentname-devfb80c";
 
     @BeforeEach
     void setUp() {

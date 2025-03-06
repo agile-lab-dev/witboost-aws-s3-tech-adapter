@@ -61,6 +61,7 @@ class StorageAreaValidationServiceTest {
         var component = mock(com.witboost.provisioning.model.Component.class);
         when(component.getSpecific()).thenReturn(validSpecific);
         when(request.getComponent()).thenReturn(Optional.of(component));
+        when(component.getId()).thenReturn("urn:dmb:cmp:finance:reporting:0:raw-storage-area");
         DataProduct dp = new DataProduct<>();
         dp.setName("dp");
         when(request.getDataProduct()).thenReturn(dp);
@@ -83,6 +84,7 @@ class StorageAreaValidationServiceTest {
         var component = mock(com.witboost.provisioning.model.Component.class);
         when(component.getSpecific()).thenReturn(validSpecific);
         when(request.getComponent()).thenReturn(Optional.of(component));
+        when(component.getId()).thenReturn("urn:dmb:cmp:finance:reporting:0:raw-storage-area");
         DataProduct dp = new DataProduct<>();
         dp.setName("dp");
         when(request.getDataProduct()).thenReturn(dp);
@@ -107,6 +109,7 @@ class StorageAreaValidationServiceTest {
         DataProduct dp = new DataProduct<>();
         dp.setName("dp");
         when(request.getDataProduct()).thenReturn(dp);
+        when(component.getId()).thenReturn("urn:dmb:cmp:finance:reporting:0:raw-storage-area");
 
         when(bucketManager.doesBucketExist(any(S3Client.class), anyString())).thenReturn(Either.right(true));
         when(bucketManager.getBucketRegion(any(S3Client.class), anyString())).thenReturn(Either.right("eu-central-1"));
@@ -115,7 +118,7 @@ class StorageAreaValidationServiceTest {
 
         assertTrue(result.isLeft());
         String error =
-                "[Bucket: null-dp-null4232f] Error: The bucket is located in a different region from eu-west-1. Current region of the bucket: eu-central-1.";
+                "[Bucket: null-dp-raw-storage-area-null5842d] Error: The bucket is located in a different region from eu-west-1. Current region of the bucket: eu-central-1.";
         FailedOperation expectedError = new FailedOperation(error, List.of(new Problem(error)));
 
         assertEquals(expectedError, result.getLeft());

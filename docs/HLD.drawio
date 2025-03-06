@@ -1,10 +1,10 @@
-<mxfile host="Electron" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/26.0.9 Chrome/128.0.6613.186 Electron/32.2.5 Safari/537.36" version="26.0.9" pages="2">
+<mxfile host="Electron" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/26.0.4 Chrome/128.0.6613.186 Electron/32.2.5 Safari/537.36" version="26.0.4" pages="2">
   <diagram id="eZ375qKk8LWyOJYQztjw" name="S3 bucket - provisioning">
-    <mxGraphModel dx="3243" dy="1122" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" background="#ffffff" math="0" shadow="0">
+    <mxGraphModel dx="2123" dy="614" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" background="#ffffff" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="1UD2cVJRev7sIc3YvW7m-4" value="S3 bucket: domain-dataproduct-environment-hash" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;align=center;strokeWidth=2;" parent="1" vertex="1">
+        <mxCell id="1UD2cVJRev7sIc3YvW7m-4" value="S3 bucket: domain-dataproduct-component-dev-hash" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;align=center;strokeWidth=2;" parent="1" vertex="1">
           <mxGeometry x="600" y="977" width="410" height="280" as="geometry" />
         </mxCell>
         <mxCell id="LNALhKh-zvmf5X7zv8Wf-10" value="Required technical user with s3:CreateBucket and s3:PutObject permission" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;darkOpacity=0.05;" parent="1" vertex="1">
@@ -142,7 +142,7 @@
         <mxCell id="1UD2cVJRev7sIc3YvW7m-7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.445;entryDx=0;entryDy=0;entryPerimeter=0;endArrow=none;endFill=0;dashed=1;" parent="1" source="LNALhKh-zvmf5X7zv8Wf-8" target="1UD2cVJRev7sIc3YvW7m-4" edge="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="BE3YJCl27VgGvU1Rk1fR-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=none;startFill=0;dashed=1;" edge="1" parent="1" source="LNALhKh-zvmf5X7zv8Wf-7">
+        <mxCell id="BE3YJCl27VgGvU1Rk1fR-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=none;startFill=0;dashed=1;" parent="1" source="LNALhKh-zvmf5X7zv8Wf-7" edge="1">
           <mxGeometry relative="1" as="geometry">
             <mxPoint x="620" y="1154" as="targetPoint" />
           </mxGeometry>

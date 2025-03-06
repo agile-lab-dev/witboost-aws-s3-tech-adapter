@@ -45,14 +45,14 @@ This flow enables the creation and management of S3 buckets and folders linked t
 
 #### - **Provisioning Request**
 - A provisioning request is sent to the system by the **Provisioning Coordinator**.
-- This request includes a YAML descriptor containing metadata required to configure the bucket and its component folders.
+- This request includes a YAML descriptor containing metadata required to configure the bucket and its folders.
 
 #### - **Request Validation**
 - The **S3 Tech Adapter** validates the provisioning request to ensure that it includes the required fields.
 
 #### - **Metadata Extraction**
 - Metadata is extracted from the request descriptor to determine:
-    - The **S3 bucket name** in the format: `domain-dataproduct-environment-hash`.
+    - The **S3 bucket name** in the format: `domain-dataproduct-component-environment-hash`.
     - The **component folders** to be created within the bucket.
 
 #### - **Bucket Creation**
@@ -84,7 +84,7 @@ The following table describes the default values applied to S3 buckets during cr
 
 ### Requirements
 
-- **Technical User**: A technical user with `s3:ListBucket`, `s3:CreateBucket` and `s3:PutObject` permissions is required to provision and manage S3 resources.
+- **Technical User**: A technical user with `s3:ListBucket`, `s3:CreateBucket` and `s3:PutObject` permissions is required to provision and manage S3 resources. If KMS is needed for the encryption, the following permissions are needed: `kms:CreateKey`, `kms:CreateAlias`, `kms:TagResource`, `kms:PutKeyPolicy` and `kms:GenerateDataKey`
 
 ## Unprovisioning
 
@@ -101,7 +101,7 @@ This flow enables the removal of component folders within an S3 bucket without i
 
 #### - **Metadata Extraction**
 - Metadata is extracted from the request to:
-  - Identify the **S3 bucket name** in the format: `domain-dataproduct-environment-hash`.
+  - Identify the **S3 bucket name** in the format: `domain-dataproduct-component-environment-hash`.
   - Determine the **component folder** to be deleted.
 
 #### - **Operation Result Reporting**

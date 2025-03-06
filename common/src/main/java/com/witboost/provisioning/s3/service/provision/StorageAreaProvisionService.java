@@ -71,7 +71,7 @@ public class StorageAreaProvisionService implements ProvisionService {
             S3Client s3Client = s3ClientProvider.apply(region);
             KmsClient kmsClient = kmsClientProvider.apply(region);
 
-            String bucketName = S3Utils.computeBucketName(operationRequest.getDataProduct());
+            String bucketName = S3Utils.computeBucketName(operationRequest.getDataProduct(), storageArea);
 
             Either<FailedOperation, Void> bucketCreationResult = bucketManager.createOrUpdateBucket(
                     s3Client,

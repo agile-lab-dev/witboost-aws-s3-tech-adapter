@@ -1,5 +1,6 @@
 package com.witboost.provisioning.s3.utils;
 
+import com.witboost.provisioning.model.Component;
 import com.witboost.provisioning.model.DataProduct;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -11,11 +12,14 @@ public class S3Utils {
      * The bucket name is truncated to 58 characters if it's too long, and a hash (SHA-256) is appended.
      *
      * @param dp The DataProduct object containing the domain, name, and environment.
+     * @param component The Component object containing the component name.
      * @return The computed bucket name, possibly truncated and appended with a hash.
      */
-    public static String computeBucketName(DataProduct dp) {
+    public static String computeBucketName(DataProduct dp, Component component) {
 
-        String bucketNameWithoutHash = dp.getDomain() + "-" + dp.getName() + "-" + dp.getEnvironment();
+        String componentName = component.getId().split(":")[6];
+        String bucketNameWithoutHash =
+                dp.getDomain() + "-" + dp.getName() + "-" + componentName + "-" + dp.getEnvironment();
         bucketNameWithoutHash = bucketNameWithoutHash.replaceAll("\\s+", "").toLowerCase();
 
         String hash = sha256(bucketNameWithoutHash);
