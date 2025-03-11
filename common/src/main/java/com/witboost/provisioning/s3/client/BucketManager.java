@@ -3,6 +3,7 @@ package com.witboost.provisioning.s3.client;
 import com.witboost.provisioning.model.common.FailedOperation;
 import com.witboost.provisioning.model.common.Problem;
 import com.witboost.provisioning.s3.model.BucketTag;
+import com.witboost.provisioning.s3.model.IntelligentTieringConfiguration;
 import com.witboost.provisioning.s3.model.LifeCycleConfiguration;
 import com.witboost.provisioning.s3.model.S3Specific;
 import io.vavr.control.Either;
@@ -117,6 +118,41 @@ public class BucketManager {
                 var multipleVersioning =
                         enableBucketVersioning(s3Client, bucketName, s3Specific.getLifeCycleConfiguration());
                 if (multipleVersioning.isLeft()) return Either.left(multipleVersioning.getLeft());
+            }
+
+            IntelligentTieringConfiguration intelligentTieringConfiguration =
+                    s3Specific.getIntelligentTieringConfiguration();
+            if ((intelligentTieringConfiguration.getArchiveAccessTierEnabled()
+                    || intelligentTieringConfiguration.getDeepArchiveAccessTierEnabled())) {
+                ArrayList<Tiering> tierings = new ArrayList<>();
+                if (intelligentTieringConfiguration.getArchiveAccessTierEnabled()) {
+                    Tiering tiering = Tiering.builder()
+                            .accessTier(IntelligentTieringAccessTier.ARCHIVE_ACCESS)
+                            .days(intelligentTieringConfiguration.getArchiveAccessTierDays())
+                            .build();
+                    tierings.add(tiering);
+                }
+                if (intelligentTieringConfiguration.getDeepArchiveAccessTierEnabled()) {
+                    Tiering tiering = Tiering.builder()
+                            .accessTier(IntelligentTieringAccessTier.DEEP_ARCHIVE_ACCESS)
+                            .days(intelligentTieringConfiguration.getDeepArchiveAccessTierDays())
+                            .build();
+                    tierings.add(tiering);
+                }
+                PutBucketIntelligentTieringConfigurationRequest request =
+                        PutBucketIntelligentTieringConfigurationRequest.builder()
+                                .bucket(bucketName)
+                                .id("witboostConfig")
+                                .intelligentTieringConfiguration(
+                                        software.amazon.awssdk.services.s3.model.IntelligentTieringConfiguration
+                                                .builder()
+                                                .id("witboostConfig")
+                                                .status(IntelligentTieringStatus.ENABLED)
+                                                .tierings(tierings)
+                                                .build())
+                                .build();
+
+                s3Client.putBucketIntelligentTieringConfiguration(request);
             }
 
             logger.info("Bucket '{}' is successfully created or updated in region '{}'.", bucketName, region);

@@ -23,7 +23,6 @@ class IntelligentTieringConfigurationTest {
     @Test
     void testValidConfiguration() {
         IntelligentTieringConfiguration config = new IntelligentTieringConfiguration();
-        config.setEnabled(true);
         config.setArchiveAccessTierEnabled(true);
         config.setDeepArchiveAccessTierEnabled(true);
         config.setArchiveAccessTierDays(120);
@@ -36,13 +35,11 @@ class IntelligentTieringConfigurationTest {
     @Test
     void testGettersAndSetters() {
         IntelligentTieringConfiguration config = new IntelligentTieringConfiguration();
-        config.setEnabled(false);
         config.setArchiveAccessTierEnabled(false);
         config.setDeepArchiveAccessTierEnabled(false);
         config.setArchiveAccessTierDays(100);
         config.setDeepArchiveAccessTierDays(300);
 
-        assertFalse(config.getEnabled());
         assertFalse(config.getArchiveAccessTierEnabled());
         assertFalse(config.getDeepArchiveAccessTierEnabled());
         assertEquals(100, config.getArchiveAccessTierDays());
@@ -52,11 +49,9 @@ class IntelligentTieringConfigurationTest {
     @Test
     void testEnabledCanBeNull() {
         IntelligentTieringConfiguration config = new IntelligentTieringConfiguration();
-        config.setEnabled(null);
         config.setArchiveAccessTierEnabled(null);
         config.setDeepArchiveAccessTierEnabled(null);
 
-        assertNull(config.getEnabled());
         assertNull(config.getArchiveAccessTierEnabled());
         assertNull(config.getDeepArchiveAccessTierEnabled());
     }
@@ -104,6 +99,7 @@ class IntelligentTieringConfigurationTest {
     @Test
     void testInvalidArchiveAccessTierDays_BelowMin() {
         IntelligentTieringConfiguration config = new IntelligentTieringConfiguration();
+        config.setArchiveAccessTierEnabled(true);
         config.setArchiveAccessTierDays(80);
 
         Set<ConstraintViolation<IntelligentTieringConfiguration>> violations = validator.validate(config);
@@ -113,6 +109,7 @@ class IntelligentTieringConfigurationTest {
     @Test
     void testInvalidArchiveAccessTierDays_AboveMax() {
         IntelligentTieringConfiguration config = new IntelligentTieringConfiguration();
+        config.setArchiveAccessTierEnabled(true);
         config.setArchiveAccessTierDays(750);
 
         Set<ConstraintViolation<IntelligentTieringConfiguration>> violations = validator.validate(config);
@@ -122,6 +119,7 @@ class IntelligentTieringConfigurationTest {
     @Test
     void testInvalidDeepArchiveAccessTierDays_BelowMin() {
         IntelligentTieringConfiguration config = new IntelligentTieringConfiguration();
+        config.setDeepArchiveAccessTierEnabled(true);
         config.setDeepArchiveAccessTierDays(150);
 
         Set<ConstraintViolation<IntelligentTieringConfiguration>> violations = validator.validate(config);
@@ -131,6 +129,7 @@ class IntelligentTieringConfigurationTest {
     @Test
     void testInvalidDeepArchiveAccessTierDays_AboveMax() {
         IntelligentTieringConfiguration config = new IntelligentTieringConfiguration();
+        config.setDeepArchiveAccessTierEnabled(true);
         config.setDeepArchiveAccessTierDays(800);
 
         Set<ConstraintViolation<IntelligentTieringConfiguration>> violations = validator.validate(config);

@@ -18,9 +18,9 @@ public class S3Utils {
     public static String computeBucketName(DataProduct dp, Component component) {
 
         String componentName = component.getId().split(":")[6];
-        String bucketNameWithoutHash =
-                dp.getDomain() + "-" + dp.getName() + "-" + componentName + "-" + dp.getEnvironment();
-        bucketNameWithoutHash = bucketNameWithoutHash.replaceAll("\\s+", "").toLowerCase();
+        String bucketNameWithoutHash = normalize(dp.getDomain()) + "-" + normalize(dp.getName()) + "-" + componentName
+                + "-" + normalize(dp.getEnvironment());
+        bucketNameWithoutHash = bucketNameWithoutHash.toLowerCase();
 
         String hash = sha256(bucketNameWithoutHash);
 
@@ -29,6 +29,10 @@ public class S3Utils {
         }
 
         return bucketNameWithoutHash + hash.substring(0, 5);
+    }
+
+    private static String normalize(String s) {
+        return s.replaceAll("[^\\w]", "");
     }
 
     /**

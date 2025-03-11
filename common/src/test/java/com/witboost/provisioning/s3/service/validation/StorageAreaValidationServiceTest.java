@@ -20,6 +20,7 @@ import io.vavr.control.Either;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Function;
+import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
@@ -54,16 +55,13 @@ class StorageAreaValidationServiceTest {
     @Test
     void validate_success_sameRegion() {
         OperationRequest<?, S3Specific> request = mock(OperationRequest.class);
-        S3Specific validSpecific = new S3Specific();
-        validSpecific.setMultipleVersion(false);
-        validSpecific.setRegion("eu-west-1");
+        S3Specific validSpecific = getS3SpecificForTest();
 
         var component = mock(com.witboost.provisioning.model.Component.class);
         when(component.getSpecific()).thenReturn(validSpecific);
         when(request.getComponent()).thenReturn(Optional.of(component));
         when(component.getId()).thenReturn("urn:dmb:cmp:finance:reporting:0:raw-storage-area");
-        DataProduct dp = new DataProduct<>();
-        dp.setName("dp");
+        DataProduct dp = getDataProductForTest();
         when(request.getDataProduct()).thenReturn(dp);
 
         when(bucketManager.doesBucketExist(any(S3Client.class), anyString())).thenReturn(Either.right(true));
@@ -74,19 +72,24 @@ class StorageAreaValidationServiceTest {
         assertTrue(result.isRight());
     }
 
+    private static @NotNull DataProduct getDataProductForTest() {
+        DataProduct dp = new DataProduct<>();
+        dp.setName("dp");
+        dp.setDomain("domain");
+        dp.setEnvironment("environment");
+        return dp;
+    }
+
     @Test
     void validate_success_bucketNotFound() {
         OperationRequest<?, S3Specific> request = mock(OperationRequest.class);
-        S3Specific validSpecific = new S3Specific();
-        validSpecific.setMultipleVersion(false);
-        validSpecific.setRegion("eu-west-1");
+        S3Specific validSpecific = getS3SpecificForTest();
 
         var component = mock(com.witboost.provisioning.model.Component.class);
         when(component.getSpecific()).thenReturn(validSpecific);
         when(request.getComponent()).thenReturn(Optional.of(component));
         when(component.getId()).thenReturn("urn:dmb:cmp:finance:reporting:0:raw-storage-area");
-        DataProduct dp = new DataProduct<>();
-        dp.setName("dp");
+        DataProduct dp = getDataProductForTest();
         when(request.getDataProduct()).thenReturn(dp);
 
         when(bucketManager.doesBucketExist(any(S3Client.class), anyString())).thenReturn(Either.right(false));
@@ -99,15 +102,15 @@ class StorageAreaValidationServiceTest {
     @Test
     void validate_bucketExistsInDifferentRegion() {
         OperationRequest<?, S3Specific> request = mock(OperationRequest.class);
-        S3Specific validSpecific = new S3Specific();
-        validSpecific.setMultipleVersion(false);
-        validSpecific.setRegion("eu-west-1");
+        S3Specific validSpecific = getS3SpecificForTest();
 
         var component = mock(com.witboost.provisioning.model.Component.class);
         when(component.getSpecific()).thenReturn(validSpecific);
         when(request.getComponent()).thenReturn(Optional.of(component));
         DataProduct dp = new DataProduct<>();
+        dp.setDomain("domain");
         dp.setName("dp");
+        dp.setEnvironment("env");
         when(request.getDataProduct()).thenReturn(dp);
         when(component.getId()).thenReturn("urn:dmb:cmp:finance:reporting:0:raw-storage-area");
 
@@ -118,10 +121,17 @@ class StorageAreaValidationServiceTest {
 
         assertTrue(result.isLeft());
         String error =
-                "[Bucket: null-dp-raw-storage-area-null5842d] Error: The bucket is located in a different region from eu-west-1. Current region of the bucket: eu-central-1.";
+                "[Bucket: domain-dp-raw-storage-area-envb538a] Error: The bucket is located in a different region from eu-west-1. Current region of the bucket: eu-central-1.";
         FailedOperation expectedError = new FailedOperation(error, List.of(new Problem(error)));
 
         assertEquals(expectedError, result.getLeft());
+    }
+
+    private static @NotNull S3Specific getS3SpecificForTest() {
+        S3Specific validSpecific = new S3Specific();
+        validSpecific.setMultipleVersion(false);
+        validSpecific.setRegion("eu-west-1");
+        return validSpecific;
     }
 
     @Test

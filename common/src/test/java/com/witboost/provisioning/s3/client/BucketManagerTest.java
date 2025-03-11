@@ -6,6 +6,7 @@ import static org.mockito.Mockito.*;
 
 import com.witboost.provisioning.model.common.FailedOperation;
 import com.witboost.provisioning.s3.model.BucketTag;
+import com.witboost.provisioning.s3.model.IntelligentTieringConfiguration;
 import com.witboost.provisioning.s3.model.LifeCycleConfiguration;
 import com.witboost.provisioning.s3.model.LifeCycleConfigurationPermanentlyDelete;
 import com.witboost.provisioning.s3.model.S3Specific;
@@ -90,7 +91,11 @@ public class BucketManagerTest {
         lifeCycleConfigurationPermanentlyDelete.setDaysAfterBecomeNonCurrent(15);
         lifeCycleConfigurationPermanentlyDelete.setNumberOfVersionsToRetain(8);
         lifeCycleConfiguration.setPermanentlyDelete(lifeCycleConfigurationPermanentlyDelete);
+        IntelligentTieringConfiguration intelligentTieringConfiguration = new IntelligentTieringConfiguration();
+        intelligentTieringConfiguration.setArchiveAccessTierEnabled(false);
+        intelligentTieringConfiguration.setDeepArchiveAccessTierEnabled(false);
         s3Specific.setLifeCycleConfiguration(lifeCycleConfiguration);
+        s3Specific.setIntelligentTieringConfiguration(intelligentTieringConfiguration);
     }
 
     @AfterEach
@@ -168,6 +173,44 @@ public class BucketManagerTest {
     @Test
     public void testCreateOrUpdateBucket_success() {
         s3Specific.setBucketTags(null);
+        s3Specific.setServerSideEncryption(ServerSideEncryption.AWS_KMS);
+        when(s3Client.listBuckets()).thenReturn(mock(ListBucketsResponse.class));
+
+        when(s3Client.createBucket(any(CreateBucketRequest.class))).thenReturn(mock(CreateBucketResponse.class));
+        S3Waiter s3Waiter = mock(S3Waiter.class);
+        when(s3Client.waiter()).thenReturn(s3Waiter);
+        var waiterResponse = mock(WaiterResponse.class);
+        when(s3Waiter.waitUntilBucketExists(any(HeadBucketRequest.class), any(WaiterOverrideConfiguration.class)))
+                .thenReturn(waiterResponse);
+
+        CreateKeyResponse createKeyResponse = CreateKeyResponse.builder()
+                .keyMetadata(KeyMetadata.builder().keyId("testKeyId").build())
+                .build();
+
+        when(kmsClient.createKey(any(CreateKeyRequest.class))).thenReturn(createKeyResponse);
+
+        ResponseOrException<HeadBucketResponse> responseOrException = mock(ResponseOrException.class);
+        when(waiterResponse.matched()).thenReturn(responseOrException);
+
+        Optional<HeadBucketResponse> response = Optional.of(mock(HeadBucketResponse.class));
+        when(responseOrException.response()).thenReturn(response);
+
+        Either<FailedOperation, Void> result =
+                bucketManager.createOrUpdateBucket(s3Client, kmsClient, bucketName, s3Specific, "accountId");
+
+        assertTrue(result.isRight());
+        verify(s3Client, times(1)).createBucket(any(CreateBucketRequest.class));
+    }
+
+    @Test
+    public void testCreateOrUpdateBucketIntelligentTearing_success() {
+        s3Specific.setBucketTags(null);
+        IntelligentTieringConfiguration intelligentTieringConfiguration = new IntelligentTieringConfiguration();
+        intelligentTieringConfiguration.setArchiveAccessTierEnabled(true);
+        intelligentTieringConfiguration.setArchiveAccessTierDays(90);
+        intelligentTieringConfiguration.setDeepArchiveAccessTierEnabled(true);
+        intelligentTieringConfiguration.setDeepArchiveAccessTierDays(180);
+        s3Specific.setIntelligentTieringConfiguration(intelligentTieringConfiguration);
         s3Specific.setServerSideEncryption(ServerSideEncryption.AWS_KMS);
         when(s3Client.listBuckets()).thenReturn(mock(ListBucketsResponse.class));
 
