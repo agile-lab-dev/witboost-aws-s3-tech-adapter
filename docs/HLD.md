@@ -1,6 +1,6 @@
 # High Level Design
 
-This document describes the High Level Design of the ArgoCD Tech Adapter.
+This document describes the High Level Design of the AWS S3 Tech Adapter.
 The source diagrams can be found and edited in the [accompanying draw.io file](hld.drawio).
 
 - [Overview](#overview)
@@ -80,30 +80,15 @@ The following table describes the default values applied to S3 buckets during cr
     - Success: Confirmation of bucket and folder creation.
     - Errors: Details of any issues encountered during the process.
 
----
 
 ### Requirements
 
 - **Technical User**: A technical user with `s3:ListBucket`, `s3:CreateBucket` and `s3:PutObject` permissions is required to provision and manage S3 resources. If KMS is needed for the encryption, the following permissions are needed: `kms:CreateKey`, `kms:CreateAlias`, `kms:TagResource`, `kms:PutKeyPolicy` and `kms:GenerateDataKey`
 
+---
+
 ## Unprovisioning
 
-![HLD_unprovisioning.png](img/HLD_unprovisioning.png)
+Currently, calls to the unprovision endpoint are supported but do not perform any operations.
 
-This flow enables the removal of component folders within an S3 bucket without impacting the bucket or other components.
-
-#### - **Unprovisioning Request**
-- An unprovisioning request is sent to the system by the **Provisioning Coordinator**.
-- This request includes a YAML descriptor containing metadata required to identify the folder for deletion.
-
-#### - **Request Validation**
-- The **S3 Tech Adapter** validates the unprovisioning request to ensure all required fields are present and correct.
-
-#### - **Metadata Extraction**
-- Metadata is extracted from the request to:
-  - Identify the **S3 bucket name** in the format: `domain-dataproduct-component-environment-hash`.
-  - Determine the **component folder** to be deleted.
-
-#### - **Operation Result Reporting**
-- The final status of the operation is reported as the outcome of the unprovisioning process.
 ---

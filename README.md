@@ -114,10 +114,10 @@ export PROVISIONER_VERSION=0.0.0-SNAPHSOT
 mvn compile
 ```
 
-**Type check:** is handled by Checkstyle:
+**Type check:** is handled by Spotless:
 
 ```bash
-mvn checkstyle:check
+mvn spotless:check
 ```
 
 **Bug checks:** are handled by SpotBugs:

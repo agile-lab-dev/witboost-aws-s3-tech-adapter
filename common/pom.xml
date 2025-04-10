@@ -77,7 +77,7 @@
         <dependency>
             <groupId>com.witboost.provisioning</groupId>
             <artifactId>java-tech-adapter-framework-core</artifactId>
-            <version>1.0.0-2.2.0</version>
+            <version>1.1.0-2.2.0</version>
         </dependency>
 
         <dependency>
@@ -126,6 +126,5 @@
             <artifactId>kms</artifactId>
             <version>${aws.java.sdk.version}</version>
         </dependency>
-
     </dependencies>
 </project>

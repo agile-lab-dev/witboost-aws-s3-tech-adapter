@@ -1,0 +1,59 @@
+dataProductOwnerDisplayName: John Doe
+projectOwner: user:john.doe_agilelab.it
+projectOwnerDisplayName: John Doe
+environment: development
+domain: finance
+projectKind: system
+kind: dataproduct
+domainId: urn:dmb:dmn:finance
+id: urn:dmb:dp:finance:exchange:0
+description: Demo data product
+devGroup: group:bigdata
+ownerGroup: john.doe_agilelab.it
+dataProductOwner: user:john.doe_agilelab.it
+email: john.doe@agilelab.it
+version: 0.1.0-SNAPSHOT-23
+fullyQualifiedName: null
+name: Exchange
+informationSLA: null
+maturity: null
+useCaseTemplateId: urn:dmb:utm:dataproduct-template:0.0.0
+infrastructureTemplateId: urn:dmb:itm:dataproduct-provisioner:1
+billing: {}
+tags: []
+specific: {}
+shoppable: false
+taxonomy:
+  id: urn:dmb:taxonomy:data-mesh-taxonomy
+  name: data-mesh-taxonomy
+components:
+  - kind: storage
+    id: urn:dmb:cmp:finance:exchange:0:john-s3-storage-area---intelligent-tearing
+    description: Demo storage area
+    name: John s3 Storage Area - intelligent tearing
+    fullyQualifiedName: Finance - Exchange - version 0 - John s3 Storage Area -
+      intelligent tearing
+    version: 0.0.0
+    infrastructureTemplateId: urn:dmb:itm:aws-s3-tech-adapter:0
+    useCaseTemplateId: urn:dmb:utm:aws-s3-template:0.0.0
+    dependsOn: []
+    platform: AWS
+    technology: S3
+    storageType: Files
+    tags: []
+    specific:
+      region: eu-west-1
+      serverSideEncryption: AWS_KMS
+      multipleVersion: true
+      lifeCycleConfiguration:
+        permanentlyDelete: null
+      intelligentTieringConfiguration:
+        archiveAccessTierEnabled: false
+        deepArchiveAccessTierEnabled: false
+      bucketTags:
+        - key: data product
+          value: Exchange
+        - key: domain
+          value: Finance
+        - key: environment
+          value: development
